@@ -19,6 +19,7 @@ const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 const { execFileSync: _execFileSync } = require("child_process");
+const dictation = require("./dictation");
 
 /** Run ledger.py, always telling it which project it is working on.
  *
@@ -235,6 +236,12 @@ function wirePanel(context, panel, conv, panels) {
   panels.set(key, panel);
   panel.onDidDispose(() => panels.delete(key));
 
+  // Dictation for the composer. Kept behind its own module so the transport
+  // can be replaced without touching the panel: today it answers with a fake
+  // transcriber, which is enough to build and judge the interaction.
+  const dict = dictation.attach(vscode, panel);
+  panel.onDidDispose(() => dict.dispose());
+
   // Repainting replaces webview.html, which destroys any open composer and the
   // scroll position. So only repaint when the underlying files actually differ
   // -- switching to the Claude tab and back must be a no-op.
@@ -282,6 +289,7 @@ function wirePanel(context, panel, conv, panels) {
   panel.repaint = () => paint(true);
 
   panel.webview.onDidReceiveMessage((msg) => {
+    if (dict.handle(msg)) return;
     if (msg && msg.type === "switch" && msg.dir) {
       panel.current = msg.dir;
       panel.title = `Ledger: ${path.basename(msg.dir)}`;

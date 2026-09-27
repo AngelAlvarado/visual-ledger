@@ -2,7 +2,7 @@
   "name": "visual-ledger",
   "displayName": "Visual Ledger",
   "description": "GitHub-style review comments on a Claude claim ledger, written back to comments.md",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "publisher": "local",
   "private": true,
   "license": "MIT",
@@ -95,6 +95,19 @@
           "type": "string",
           "default": "",
           "description": "Absolute path to ledger.py. Leave empty to auto-detect (workspace, then ~/.claude/plugins)."
+        },
+        "claudeLedger.dictation.backend": {
+          "type": "string",
+          "enum": [
+            "fake",
+            "off"
+          ],
+          "default": "fake",
+          "enumDescriptions": [
+            "Scripted placeholder text -- the microphone is NOT used",
+            "No dictate button"
+          ],
+          "description": "Which dictation backend the composer uses."
         }
       }
     }

@@ -823,22 +823,123 @@ function openComposer(id){
       <button class="btn" data-s="parked">Park</button>
       <button class="btn" data-s="dismissed">Dismiss</button>
       <button class="btn" data-s="cancel">Cancel</button>
+      <button class="btn mic" data-mic="1" type="button" data-state="idle"
+        title="Dictate (Alt+D)"><span class="dot"></span>Dictate</button>
       <span class="hint">&#8984;/Ctrl + Enter to add a note</span></div>
+    <div class="interim" hidden></div>
     `;
   el.appendChild(c);
   const ta=c.querySelector("textarea"); ta.focus();
+  attachDictation(c,ta);
   const submit=async st=>{
     const text=ta.value.trim();
     if(!text && st!=="ok" && st!=="dismissed" && st!=="parked"){ta.focus();return;}
+    stopDictation(c);
     c.remove();
     await submitOne(id,st,text||DEFAULT_TEXT[st]||"Confirmed.");
     render();
   };
   c.querySelectorAll("button").forEach(b=>b.onclick=()=>{
-    const s=b.dataset.s; if(s==="cancel"){c.remove();return;} submit(s);});
+    if(b.dataset.mic) return;            // the mic owns its own handler
+    const s=b.dataset.s;
+    if(s==="cancel"){stopDictation(c);c.remove();return;} submit(s);});
   ta.onkeydown=ev=>{if((ev.metaKey||ev.ctrlKey)&&ev.key==="Enter")submit("note");
                     if(ev.key==="Escape")c.remove();};
 }
+
+/* ---- dictation ------------------------------------------------------
+   Typing a comment is the friction this whole panel exists to remove, so the
+   composer can be spoken into instead.
+
+   The page owns the INTERACTION only; it never touches a microphone or a
+   network. It asks the extension to start a channel and renders what comes
+   back. That split is deliberate: a webview cannot capture audio here, and
+   keeping the transport behind one message boundary means the backend can be
+   swapped -- today a fake, later a real transcriber -- without the page
+   changing at all.
+
+   Three visible states, because a mic that does not visibly hear you is
+   indistinguishable from a broken one:
+     idle        grey dot, "Dictate"
+     connecting  amber blinking dot -- asked, nothing heard yet
+     listening   red pulsing dot, red textarea border
+
+   Interim text renders BELOW the box in grey italic rather than in it. The
+   service revises interim results, and watching your own sentence rewrite
+   itself under the cursor is unpleasant; only committed text lands in the
+   textarea. */
+const DICT={ch:null, box:null, ta:null, seq:0};
+
+function micBtn(box){ return box.querySelector(".btn.mic"); }
+
+function micState(box,state,err){
+  const b=micBtn(box); if(!b) return;
+  b.dataset.state=state;
+  b.lastChild.textContent = state==="listening" ? "Stop"
+                          : state==="connecting" ? "Starting" : "Dictate";
+  if(DICT.ta) DICT.ta.classList.toggle("dictating",state==="listening");
+  const iv=box.querySelector(".interim");
+  if(iv && state==="idle"){ iv.hidden=true; iv.textContent=""; }
+  let e=box.querySelector(".micerr");
+  if(err){ if(!e){e=document.createElement("div");e.className="micerr";box.appendChild(e);}
+           e.textContent=err; }
+  else if(e) e.remove();
+}
+
+function attachDictation(box,ta){
+  const b=micBtn(box); if(!b) return;
+  if(!VSC){            // file:// or a preview tab: no extension to ask
+    b.disabled=true;
+    b.title="Dictation needs the VS Code panel";
+    b.style.opacity=.45;
+    return;
+  }
+  b.onclick=()=>{ (DICT.box===box && DICT.ch) ? stopDictation(box) : startDictation(box,ta); };
+  ta.addEventListener("keydown",ev=>{
+    if(ev.altKey && (ev.key==="d"||ev.key==="D")){ev.preventDefault();b.onclick();}
+  });
+}
+
+function startDictation(box,ta){
+  if(DICT.ch) stopDictation(DICT.box);       // one mic, one composer
+  DICT.ch="d"+(++DICT.seq); DICT.box=box; DICT.ta=ta;
+  micState(box,"connecting");
+  VSC.postMessage({type:"dictate:start",channel:DICT.ch});
+}
+
+function stopDictation(box){
+  if(!DICT.ch || (box && DICT.box!==box)) return;
+  VSC.postMessage({type:"dictate:stop",channel:DICT.ch});
+  micState(DICT.box,"idle");
+  DICT.ch=null; DICT.box=null; DICT.ta=null;
+}
+
+/* Commit a finished utterance into the textarea, spacing it from whatever is
+   already there and leaving the caret at the end so typing continues to work
+   mid-dictation. */
+function commitSpeech(text){
+  const ta=DICT.ta; if(!ta||!text) return;
+  const cur=ta.value;
+  ta.value = cur && !/\s$/.test(cur) ? cur+" "+text : cur+text;
+  ta.selectionStart=ta.selectionEnd=ta.value.length;
+}
+
+window.addEventListener("message",ev=>{
+  const m=ev.data||{};
+  if(!m.type || m.type.indexOf("dictate:")!==0) return;
+  if(m.channel && m.channel!==DICT.ch) return;      // a stale channel
+  if(m.type==="dictate:state"){ micState(DICT.box,m.state,m.error); return; }
+  if(m.type==="dictate:error"){
+    micState(DICT.box,"idle",m.error||"Dictation failed.");
+    DICT.ch=null; DICT.box=null; DICT.ta=null; return;
+  }
+  if(m.type==="dictate:text"){
+    if(DICT.box) micState(DICT.box,"listening");
+    const iv=DICT.box && DICT.box.querySelector(".interim");
+    if(m.done){ commitSpeech(m.text); if(iv){iv.hidden=true;iv.textContent="";} }
+    else if(iv){ iv.hidden=false; iv.textContent=m.text; }
+  }
+});
 
 /* One action for every claim still on your side -- so finishing a turn does
    not mean typing the same thing into five composers. */
@@ -854,12 +955,17 @@ function openBatch(){
       <button class="btn" data-s="parked">Park all</button>
       <button class="btn" data-s="dismissed">Dismiss all</button>
       <button class="btn" data-s="cancel">Cancel</button>
-      <span class="hint">Ends your turn on every one of them at once.</span></div>`;
+      <button class="btn mic" data-mic="1" type="button" data-state="idle"
+        title="Dictate (Alt+D)"><span class="dot"></span>Dictate</button>
+      <span class="hint">Ends your turn on every one of them at once.</span></div>
+    <div class="interim" hidden></div>`;
   box.appendChild(d);
   const ta=d.querySelector("textarea"); ta.focus();
+  attachDictation(d,ta);
   d.querySelectorAll("button").forEach(b=>b.onclick=async()=>{
+    if(b.dataset.mic) return;
     const st=b.dataset.s;
-    if(st==="cancel"){box.innerHTML="";return;}
+    if(st==="cancel"){stopDictation(d);box.innerHTML="";return;}
     const text=ta.value.trim();
     if(!text && st==="note"){ta.focus();return;}
     for(const id of ids){

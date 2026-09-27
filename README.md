@@ -123,6 +123,27 @@ That is the whole loop. You never run a command in normal use.
 | **Park** | true, but not now | nothing — may come back. Moves to Archive |
 | **Dismiss** | not a concern | nothing, and never raises it again. Moves to Archive |
 
+### Dictating a comment
+
+Every composer has a **Dictate** button (or `Alt+D` in the textarea). The dot
+tells you where you are: grey idle, amber connecting, red pulsing listening.
+Interim words appear in grey under the box and only land in the textarea once
+a phrase finishes, so your sentence never rewrites itself under the cursor.
+
+**It is a fake right now.** The default backend emits scripted placeholder
+text and never touches the microphone — it exists so the interaction can be
+built and judged before the transcription question is settled. Turn the
+button off with `claudeLedger.dictation.backend: "off"`.
+
+A real backend implements one function in
+`scripts/vscode-extension/dictation.js`:
+
+```js
+start(channel, { onText, onState, onError }) -> stop()
+```
+
+and gets registered in `pick()`. The panel does not change.
+
 ### Reading the panel
 
 - **Purple bar** — what is waiting on you, with jump chips. Claude sets this.
@@ -277,6 +298,7 @@ count.
 | `scripts/ledger.py` | renderer and CLI. Python stdlib only |
 | `scripts/test_page.js` | runs the page's JS in a shim DOM after every render |
 | `scripts/vscode-extension/` | the panel |
+| `scripts/vscode-extension/dictation.js` | dictation backends (fake by default) |
 | `scripts/install-extension.sh` | builds a `.vsix` and installs it |
 | `scripts/patch-claude-extension.py` | optional, **run by hand** |
 | `scripts/sync_conversations.py` | list sessions |

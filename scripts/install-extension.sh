@@ -53,7 +53,11 @@ vsix = out / f"{pub}.{name}-{ver}.vsix"
 with zipfile.ZipFile(vsix, "w", zipfile.ZIP_DEFLATED) as z:
     z.writestr("extension.vsixmanifest", manifest)
     z.writestr("[Content_Types].xml", ctypes)
-    for f in ("package.json", "extension.js"):
+    # Every .js at the extension root, not a hardcoded pair: a module added
+    # later (dictation.js was the first) would otherwise be silently missing
+    # from the .vsix and fail at require() time, in the user's editor.
+    files = ["package.json"] + sorted(f.name for f in src.glob("*.js"))
+    for f in files:
         z.write(src / f, f"extension/{f}")
 print(vsix)
 PY

@@ -130,7 +130,18 @@ function main() {
   const store = {};
   const sandbox = {
     document: doc,
-    window: { showDirectoryPicker: undefined },
+    // The page listens on `window` for the extension's dictation frames, so
+    // the shim has to accept listeners and be able to deliver one -- a stub
+    // that only exists would let a broken handler pass unnoticed.
+    window: {
+      showDirectoryPicker: undefined,
+      _msg: [],
+      addEventListener(type, fn) { if (type === "message") this._msg.push(fn); },
+      removeEventListener(type, fn) {
+        if (type === "message") this._msg = this._msg.filter((f) => f !== fn);
+      },
+      postMessage(data) { this._msg.forEach((fn) => fn({ data })); },
+    },
     location: { protocol: "vscode-webview:", href: "" },
     navigator: { clipboard: { writeText: async () => {} } },
     localStorage: {
@@ -202,12 +213,26 @@ function main() {
     fail.push("archived card is hidden inside the Archive");
   }
 
+  // Dictation: the page must survive a frame from the extension without
+  // throwing. A handler that references a deleted element is invisible until
+  // someone actually dictates, which is exactly the class of regression this
+  // harness exists to catch.
+  try {
+    sandbox.window.postMessage({ type: "dictate:state", channel: "x", state: "listening" });
+    sandbox.window.postMessage({ type: "dictate:text", channel: "x", text: "hello", done: false });
+    sandbox.window.postMessage({ type: "dictate:text", channel: "x", text: "hello", done: true });
+    sandbox.window.postMessage({ type: "dictate:error", channel: "x", error: "nope" });
+  } catch (e) {
+    fail.push(`dictation frame threw: ${e.message}`);
+  }
+  if (!sandbox.window._msg.length) fail.push("page registered no message listener");
+
   if (fail.length) {
     console.error("FAIL");
     fail.forEach((f) => console.error("  - " + f));
     process.exit(1);
   }
-  console.log("  chips filter, dismiss fires, tags filter -- OK");
+  console.log("  chips filter, dismiss fires, tags filter, dictation frames -- OK");
 }
 
 main();
