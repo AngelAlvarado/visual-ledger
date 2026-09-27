@@ -1,0 +1,15 @@
+{
+  "name": "visual-ledger",
+  "version": "0.1.0",
+  "description": "Turn a working conversation into a numbered list of checkable claims, reviewed with inline comments in a VS Code panel.",
+  "keywords": [
+    "ledger",
+    "review",
+    "claims",
+    "assumptions",
+    "design"
+  ],
+  "author": {
+    "name": "Angel Alvarado"
+  }
+}

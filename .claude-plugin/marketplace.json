@@ -1,0 +1,14 @@
+{
+  "name": "visual-ledger-marketplace",
+  "description": "Visual Ledger",
+  "owner": {
+    "name": "Angel Alvarado"
+  },
+  "plugins": [
+    {
+      "name": "visual-ledger",
+      "source": "./",
+      "description": "Claim ledger with a VS Code review panel."
+    }
+  ]
+}

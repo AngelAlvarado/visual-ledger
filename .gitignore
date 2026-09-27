@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.DS_Store
+*.vsix
+# Ledgers created while developing the plugin against itself
+.claude/ledgers/**/comments.md
+.claude/ledgers/**/index.html
+.claude/ledgers/**/.turns-cache.json
+.ledger-*.json
+*.token

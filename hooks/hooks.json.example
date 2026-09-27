@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "Hook registration travels with the plugin, so installing it needs no",
+    "settings.json edit -- that manual step was the one most likely to be",
+    "skipped, and a missing registration looks exactly like a working install.",
+    "",
+    "${CLAUDE_PLUGIN_ROOT} expands to this plugin's directory. It is quoted",
+    "because these run through a shell, and an unquoted path with a space in",
+    "it would split into two arguments."
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger-ensure.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger-comments.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger-stop.py\"",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}
