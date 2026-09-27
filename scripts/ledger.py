@@ -203,7 +203,7 @@ def parse_ledger(path):
         if kind not in KINDS:
             sys.exit(f"{path.name}: {cid} has unknown kind {kind!r} "
                      f"(expected one of {', '.join(KINDS)})")
-        FIELDS = ("turn:", "context:", "tags:")
+        FIELDS = ("turn:", "context:", "tags:", "artifact:")
         body = [l for l in buf
                 if not l.startswith("> ") and not l.startswith(FIELDS)]
         detail = [l[2:] for l in buf if l.startswith("> ")]
@@ -215,6 +215,9 @@ def parse_ledger(path):
         claims.append({
             "id": cid, "kind": kind, "turn": field("turn"),
             "context": field("context"),
+            # The file this claim governs. Resolving the claim without
+            # touching it is the drift this renderer flags.
+            "artifact": field("artifact"),
             "tags": [x for x in re.split(r"[,\s]+", field("tags")) if x],
             "text": "\n".join(body).strip(),
             "detail": "\n".join(detail).strip(),
@@ -225,6 +228,110 @@ def parse_ledger(path):
         sys.exit(f"{path.name}: duplicate claim ids {sorted(dup)} -- comments would "
                  f"attach to whichever rendered last. Renumber before re-running.")
     return meta, claims
+
+
+# ----------------------------------------------------------------- drift
+# Resolving a claim usually MEANS editing something durable -- a spec, a task
+# file, code. Nothing enforced that, so a claim could be marked resolved while
+# the artifact kept saying the old thing, and the artifact is the one that
+# becomes code. This compares the two dates at render time.
+#
+# Deliberately not a watcher or a timer: drift is not a function of elapsed
+# time, it is a function of one event -- claim resolved, artifact untouched.
+# Rendering already happens on every claim edit, every comment, and every
+# panel open, so the check rides along on something that already runs.
+
+# Only `resolved` counts. `answered` is usually "I answered your question",
+# which carries no artifact obligation -- triggering on it would flag ordinary
+# back-and-forth and teach everyone to ignore the badge.
+ENCODING_STATUSES = {"resolved"}
+
+
+def _utc(ts):
+    """Parse a comment timestamp, which is UTC written without its marker.
+
+    The panel stamps comments with `new Date().toISOString().slice(0,19)` --
+    UTC with the trailing Z sliced off. Read naively that is local time, which
+    on a machine at UTC-7 puts every reply seven hours in the future and makes
+    every artifact look stale. So: attach UTC unless the string says otherwise.
+    """
+    import datetime
+    s = (ts or "").strip()
+    if not s:
+        return None
+    try:
+        d = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return d.replace(tzinfo=datetime.timezone.utc) if d.tzinfo is None else d
+
+
+def artifact_changed_at(path):
+    """When the artifact last changed, as an aware datetime, or None.
+
+    `git log` alone is wrong here. The normal state in this workflow is a
+    tracked file with UNCOMMITTED edits -- Claude edits the spec and does not
+    commit -- and git would report the last commit, which can be weeks old. A
+    real case while building this: git said Sep 3, the file had been edited
+    that minute. So: if git reports the path dirty, trust the working tree.
+    """
+    import datetime
+    import subprocess
+    p = (ROOT / path).resolve()
+    if not p.exists():
+        return None
+
+    def mtime():
+        return datetime.datetime.fromtimestamp(p.stat().st_mtime,
+                                               datetime.timezone.utc)
+    try:
+        dirty = subprocess.run(
+            ["git", "-C", str(ROOT), "status", "--porcelain", "--", str(p)],
+            capture_output=True, text=True, timeout=5)
+        if dirty.returncode != 0:
+            return mtime()              # not a repo, or git unhappy
+        if dirty.stdout.strip():
+            return mtime()              # uncommitted edits: the tree is truth
+        out = subprocess.run(
+            ["git", "-C", str(ROOT), "log", "-1", "--format=%cI", "--", str(p)],
+            capture_output=True, text=True, timeout=5)
+        committed = _utc(out.stdout.strip()) if out.returncode == 0 else None
+        return committed or mtime()     # untracked, or no commit touches it
+    except Exception:
+        return mtime()                  # git absent or timed out: fail soft
+
+
+def drift(claims, comments):
+    """{claim id: (state, detail)} for claims carrying an artifact.
+
+    state is "ok" (artifact changed at or after the reply), "drift" (it did
+    not), "missing" (the path does not resolve) or "open" (not resolved yet).
+    Every failure path yields a state rather than an exception: a renderer
+    that crashes on a bad path is worse than one that says nothing.
+    """
+    last = {}
+    for c in comments:
+        if c["author"].lower() == "claude" and c["status"] in ENCODING_STATUSES:
+            last[c["claim"]] = c        # the most recent one wins
+    out = {}
+    for cl in claims:
+        art = cl.get("artifact")
+        if not art:
+            continue                    # claims without `artifact:` owe nothing
+        path = art.split("#", 1)[0].strip()
+        rep = last.get(cl["id"])
+        if not rep:
+            out[cl["id"]] = ("open", path)
+            continue
+        when = _utc(rep["at"])
+        changed = artifact_changed_at(path)
+        if changed is None:
+            out[cl["id"]] = ("missing", path)
+        elif when is None or changed >= when:
+            out[cl["id"]] = ("ok", path)
+        else:
+            out[cl["id"]] = ("drift", f"{path}|{rep['at']}|{changed.date()}")
+    return out
 
 
 def parse_comments(path):
@@ -597,6 +704,12 @@ h1{font-size:clamp(26px,3.6vw,36px);font-weight:600;letter-spacing:-.022em;line-
 .compose textarea.dictating{border-color:var(--crit)}
 .interim{color:var(--faint);font-style:italic;padding:5px 2px 0;font-size:12px;min-height:1em}
 .micerr{color:var(--crit);font-size:12px;padding:5px 2px 0}
+/* Artifact chip. Neutral while the claim is open, green once the file has
+   moved, red when it has not -- the one state that is a to-do. */
+.tag.art{border-style:dashed}
+.tag.art.ok{color:var(--ok);border-color:var(--ok)}
+.tag.art.drift{color:var(--crit);border-color:var(--crit);font-weight:600}
+.tag.art.missing{color:var(--warn);border-color:var(--warn)}
 .crow2{display:flex;gap:8px;margin-top:9px;align-items:center;flex-wrap:wrap}
 .hint{font-size:11.5px;color:var(--faint)}
 .empty{color:var(--faint);text-align:center;padding:40px 0;font-size:14px}
@@ -1213,8 +1326,8 @@ def siblings(conv):
     return out
 
 
-def claim_meta(c):
-    """Tag chips, and a link back to the turn that produced the claim.
+def claim_meta(c, dr=None):
+    """Tag chips, the turn link, and the artifact this claim governs.
 
     A claim read cold is hard to judge: `context:` says what prompted it and
     `tags:` says what area it belongs to, which is what makes 60 claims
@@ -1224,6 +1337,25 @@ def claim_meta(c):
     if c.get("turn"):
         bits += (f'<button class="tag src" data-turn="{e(c["turn"])}" '
                  f'title="Show the reply this came from">from {e(c["turn"])}</button>')
+    art = c.get("artifact")
+    if art:
+        state = (dr or {}).get(c["id"], ("open", ""))[0]
+        # The badge reports that the FILE changed, not that this claim's
+        # section did -- the check is file-level and an anchor is only a jump
+        # link. Worded so nobody reads the tick as "the right part was edited".
+        label, title = {
+            "ok":      ("file changed &#10003;",
+                        "The artifact changed after the claim was resolved. "
+                        "File-level: it does not verify which part changed."),
+            "drift":   ("drift &#9888;",
+                        "Resolved, but the artifact has not changed since. "
+                        "Encode it, or reply saying why nothing needed to."),
+            "missing": ("artifact missing",
+                        "The path does not resolve from the workspace root."),
+        }.get(state, ("governs", "The file this claim governs."))
+        bits += (f'<button class="tag art {e(state)}" data-open="{e(art.split("#",1)[0])}" '
+                 f'title="{title} &#183; {e(art)}">{label} &#183; '
+                 f'{e(pathlib.Path(art.split("#",1)[0]).name)}</button>')
     return f'<div class="cmeta2">{bits}</div>' if bits else ""
 
 
@@ -1275,6 +1407,7 @@ def build(meta, claims, comments, slug, disk_md, author, render_id, convs=None,
         f'title="{e(desc)}"><i></i>{e(label)}<b>{counts[k]}</b></button>'
         for k, (label, col, desc) in KINDS.items() if counts.get(k))
 
+    dr = drift(claims, comments)
     body = "".join(f'''<article class="claim{' focus' if c["id"] in focus else ''}" id="claim-{c["id"]}" data-kind="{c["kind"]}">
   <div class="crow">
     <div class="cid mono">{e(c["id"])}</div>
@@ -1285,7 +1418,7 @@ def build(meta, claims, comments, slug, disk_md, author, render_id, convs=None,
       {f'<p class="ctx">{md(c["context"])}</p>' if c.get("context") else ""}
       {f'<details class="detail"><summary>why</summary><p>{md(c["detail"])}</p></details>'
        if c["detail"] else ""}
-      {claim_meta(c)}
+      {claim_meta(c, dr)}
     </div>
     <div class="acts">
       <button class="addbtn" data-id="{c["id"]}" title="Comment on {e(c["id"])}"
@@ -1698,6 +1831,17 @@ def main(argv):
     kinds = ", ".join(f"{sum(1 for c in claims if c['kind']==k)} {k}"
                       for k in KINDS if any(c["kind"] == k for c in claims))
     print(f"wrote {out}\n  {len(claims)} claims ({kinds}), {len(comments)} comments on disk")
+
+    # Drift goes to the terminal as well as the panel: Claude reads this
+    # output after every render, which is the point at which a forgotten
+    # artifact edit is still cheap to make.
+    for cid, (state, detail) in sorted(drift(claims, comments).items()):
+        if state == "drift":
+            path, at, changed = detail.split("|")
+            print(f"  ⚠ drift: {cid} resolved {at}Z but {path} last changed "
+                  f"{changed} -- encode it, or reply why not")
+        elif state == "missing":
+            print(f"  ⚠ {cid}: artifact {detail} not found from {ROOT}")
 
     port = 8787
     for f in flags:

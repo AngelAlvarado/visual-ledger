@@ -45,6 +45,30 @@ Kinds: `decision` `assumption` `finding` `open` `risk`.
 `tags:` are 1-3 lowercase words naming the area; they render as chips that
 filter the ledger, which is what keeps 60 claims navigable.
 
+## The artifact a claim governs
+
+A claim may carry `artifact: <path>[#anchor]` -- the file this claim governs.
+When such a claim is resolved, updating that artifact in the same pass is part
+of resolving it: reply with what changed, or say explicitly why nothing needed
+to change. The renderer flags resolved claims whose artifact has not changed
+since the reply -- treat that flag as unfinished work, not a suggestion.
+Claims without `artifact:` owe nothing.
+
+    ### C8 decision
+    V0 screens ship English-only.
+    context: Scoping the first release.
+    tags: scope i18n
+    artifact: docs/spec.md#NFR6b
+
+Add it to claims that govern something durable -- a spec section, a task file,
+a module. Leave it off findings, risks and process questions, which usually
+govern nothing.
+
+The check is **file-level**: it sees that the file changed, not that your
+section did. A tick means something in that file moved after you replied, so
+it can be satisfied by an unrelated edit. The anchor is a jump link, not part
+of the check.
+
 ## Asking questions
 
 Set `focus:` in the frontmatter to say what Angel should act on **now**, with a

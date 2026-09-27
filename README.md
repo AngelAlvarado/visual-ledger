@@ -244,6 +244,36 @@ turn: T7
 - `context:` what prompted the claim — shown in italics on the card.
 - `tags:` clickable chips that filter the ledger.
 - `turn: T7` jumps to that reply in the Conversation view.
+- `artifact: <path>[#anchor]` the file this claim governs (see below).
+
+### Keeping claims and artifacts together
+
+Resolving a claim usually *means* editing something durable -- a spec, a task
+file, code. Nothing enforced that, so a claim could be marked resolved while
+the artifact kept saying the old thing, and the artifact is what becomes code.
+
+A claim carrying `artifact:` gets checked at render time: if it has a `claude
+... resolved` reply and the file has not changed since that reply, the CLI
+prints a `drift` line and the card shows a red badge. Touch the file and
+re-render and it clears.
+
+This rides on rendering rather than a hook or a timer. Drift is not a function
+of elapsed time but of one event -- claim resolved, artifact untouched -- and
+rendering already happens on every claim edit, every comment and every panel
+open, in every environment where the panel works at all.
+
+Details worth knowing:
+
+- Only `resolved` triggers it. `answered` is usually "I answered your
+  question" and carries no artifact obligation.
+- Uncommitted edits count. `git log` alone reports the last *commit*, which in
+  this workflow is routinely weeks behind the working tree.
+- The check is **file-level**. The `#anchor` is a jump link; a tick means the
+  file moved, not that the right section did.
+- One direction only. Claims with `artifact:` owe an update when resolved; no
+  one is required to write a claim for an arbitrary edit.
+- Fail-soft everywhere: no git, a deleted path or an empty `comments.md`
+  degrade to no badge, never an exception.
 
 Frontmatter:
 
