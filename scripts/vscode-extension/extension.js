@@ -18,7 +18,26 @@
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
-const { execFileSync } = require("child_process");
+const { execFileSync: _execFileSync } = require("child_process");
+
+/** Run ledger.py, always telling it which project it is working on.
+ *
+ *  ledger.py resolves the project from $LEDGER_ROOT, then $CLAUDE_PROJECT_DIR,
+ *  then the git root above its cwd. Claude Code sets CLAUDE_PROJECT_DIR for
+ *  hooks; nothing sets it for us, and the extension host's cwd is not the
+ *  workspace -- so without this the script resolved to wherever VS Code
+ *  happened to be started and reported no ledgers at all.
+ *
+ *  The extension is the one component that reliably knows the workspace, so
+ *  it is the one that has to say. */
+function execFileSync(cmd, args, opts) {
+  const root = workspaceRoot();
+  return _execFileSync(cmd, args, {
+    cwd: root,
+    ...opts,
+    env: { ...process.env, LEDGER_ROOT: process.env.LEDGER_ROOT || root },
+  });
+}
 
 /** Resolved from the open workspace, not hardcoded, so the extension works in
  *  any container without editing a path. */
