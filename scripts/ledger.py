@@ -999,7 +999,7 @@ function openComposer(id){
    service revises interim results, and watching your own sentence rewrite
    itself under the cursor is unpleasant; only committed text lands in the
    textarea. */
-const DICT={ch:null, box:null, ta:null, seq:0};
+const DICT={ch:null, box:null, ta:null, seq:0, base:"", said:""};
 
 function micBtn(box){ return box.querySelector("button.mic"); }
 
@@ -1037,6 +1037,7 @@ function attachDictation(box,ta){
 function startDictation(box,ta){
   if(DICT.ch) stopDictation(DICT.box);       // one mic, one composer
   DICT.ch="d"+(++DICT.seq); DICT.box=box; DICT.ta=ta;
+  DICT.base=ta.value; DICT.said="";      // anything already typed is kept
   micState(box,"connecting");
   VSC.postMessage({type:"dictate:start",channel:DICT.ch});
 }
@@ -1048,13 +1049,23 @@ function stopDictation(box){
   DICT.ch=null; DICT.box=null; DICT.ta=null;
 }
 
-/* Commit a finished utterance into the textarea, spacing it from whatever is
-   already there and leaving the caret at the end so typing continues to work
-   mid-dictation. */
-function commitSpeech(text){
+/* Commit dictated text into the textarea.
+
+   Two backend shapes, and getting them confused is destructive. An
+   INCREMENTAL backend sends each finished phrase once, so phrases accumulate.
+   A CUMULATIVE one restates the entire transcript in every frame, so
+   appending it would repeat everything that came before, growing
+   quadratically. The real speech socket is cumulative and sends no
+   per-phrase commit at all -- the commit point is when you press stop.
+
+   DICT.base is whatever was already typed in the box before dictation
+   started; it must survive either shape. */
+function commitSpeech(text,cumulative){
   const ta=DICT.ta; if(!ta||!text) return;
-  const cur=ta.value;
-  ta.value = cur && !/\s$/.test(cur) ? cur+" "+text : cur+text;
+  if(cumulative) DICT.said=text;
+  else DICT.said = DICT.said ? DICT.said+" "+text : text;
+  const base=DICT.base||"";
+  ta.value = base && !/\s$/.test(base) ? base+" "+DICT.said : base+DICT.said;
   ta.selectionStart=ta.selectionEnd=ta.value.length;
 }
 
@@ -1070,7 +1081,7 @@ window.addEventListener("message",ev=>{
   if(m.type==="dictate:text"){
     if(DICT.box) micState(DICT.box,"listening");
     const iv=DICT.box && DICT.box.querySelector(".interim");
-    if(m.done){ commitSpeech(m.text); if(iv){iv.hidden=true;iv.textContent="";} }
+    if(m.done){ commitSpeech(m.text,m.cumulative); if(iv){iv.hidden=true;iv.textContent="";} }
     else if(iv){ iv.hidden=false; iv.textContent=m.text; }
   }
 });

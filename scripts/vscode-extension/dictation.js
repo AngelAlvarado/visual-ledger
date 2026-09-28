@@ -6,8 +6,14 @@
  *
  *      start(channel, { onText, onState, onError }) -> stop()
  *
- *      onText(text, done)   done=false is interim and may be revised;
- *                           done=true commits into the textarea
+ *      onText(text, done, cumulative)
+ *                           done=false is interim and may be revised;
+ *                           done=true commits into the textarea.
+ *                           cumulative=true means `text` is the whole
+ *                           transcript so far, so the page REPLACES what it
+ *                           has instead of appending -- the real backend
+ *                           restates everything in every frame, and
+ *                           appending that duplicates it exponentially.
  *      onState("connecting" | "listening")
  *      onError(message)
  *
@@ -46,10 +52,10 @@ function fakeBackend(channel, cb) {
       if (stopped) return;
       i += 1;
       if (i <= words.length) {
-        cb.onText(words.slice(0, i).join(" "), false);   // interim, growing
+        cb.onText(words.slice(0, i).join(" "), false, false);  // interim
         timer = setTimeout(tick, 140);
       } else {
-        cb.onText(words.join(" "), true);                // commit
+        cb.onText(words.join(" "), true, false);               // commit
         timer = setTimeout(speak, 900);                  // next utterance
       }
     };
@@ -63,12 +69,24 @@ function fakeBackend(channel, cb) {
   return () => { stopped = true; if (timer) clearTimeout(timer); };
 }
 
-/** Which backend to use. `claudeLedger.dictation.backend`: "fake" (default)
- *  or "off". A real backend registers here when one exists. */
+/** Which backend to use. `claudeLedger.dictation.backend`:
+ *    "fake"      scripted placeholder text (default)
+ *    "anthropic" the real socket -- UNVERIFIED, undocumented, see that file
+ *    "off"       no button
+ *  Returns a function with the signature at the top of this file, already
+ *  bound to whatever options its backend needs. */
 function pick(vscode) {
-  const mode = vscode.workspace.getConfiguration("claudeLedger")
-    .get("dictation.backend") || "fake";
+  const cfg = vscode.workspace.getConfiguration("claudeLedger");
+  const mode = cfg.get("dictation.backend") || "fake";
   if (mode === "off") return null;
+  if (mode === "anthropic") {
+    const { anthropicBackend } = require("./dictation-anthropic");
+    const opts = {
+      tokenPath: cfg.get("dictation.tokenPath") || "",
+      language: cfg.get("dictation.language") || "en",
+    };
+    return (channel, cb) => anthropicBackend(channel, cb, opts);
+  }
   return fakeBackend;
 }
 
@@ -102,8 +120,9 @@ function attach(vscode, panel) {
     }
     try {
       const stop = backend(channel, {
-        onText: (text, done) => { if (active && active.channel === channel)
-                                    post({ type: "dictate:text", channel, text, done }); },
+        onText: (text, done, cumulative) => { if (active && active.channel === channel)
+                                    post({ type: "dictate:text", channel, text, done,
+                                           cumulative: !!cumulative }); },
         onState: (state) => { if (active && active.channel === channel)
                                 post({ type: "dictate:state", channel, state }); },
         onError: (error) => { if (active && active.channel === channel) {

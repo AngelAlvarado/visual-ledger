@@ -2,7 +2,7 @@
   "name": "visual-ledger",
   "displayName": "Visual Ledger",
   "description": "GitHub-style review comments on a Claude claim ledger, written back to comments.md",
-  "version": "0.15.0",
+  "version": "0.16.0-anthropic",
   "publisher": "local",
   "private": true,
   "license": "MIT",
@@ -100,14 +100,26 @@
           "type": "string",
           "enum": [
             "fake",
+            "anthropic",
             "off"
           ],
           "default": "fake",
           "enumDescriptions": [
             "Scripted placeholder text -- the microphone is NOT used",
+            "Anthropic's speech socket. UNVERIFIED and undocumented; needs a claude.ai token that expires in hours",
             "No dictate button"
           ],
           "description": "Which dictation backend the composer uses."
+        },
+        "claudeLedger.dictation.tokenPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a file holding a claude.ai token. Only used by the 'anthropic' backend. Keep it outside version control."
+        },
+        "claudeLedger.dictation.language": {
+          "type": "string",
+          "default": "en",
+          "description": "Language code passed to the speech backend."
         }
       }
     }
