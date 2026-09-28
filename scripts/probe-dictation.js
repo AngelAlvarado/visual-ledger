@@ -28,6 +28,21 @@
 const fs = require("fs");
 const { spawn } = require("child_process");
 
+// Node gained a global WebSocket in 18 but only unflagged it later; the node
+// on PATH in this devcontainer is v20 and does not have it, while the one VS
+// Code ships (v22) does. Without this guard the failure is a bare
+// "ReferenceError: WebSocket is not defined" a hundred lines from the cause.
+if (typeof WebSocket === "undefined") {
+  console.error(`This needs a Node with a global WebSocket. Yours is ${process.version}.
+
+Use the Node that ships with VS Code:
+
+  /home/node/.vscode-server/bin/*/node ${process.argv[1]} <token-file> [seconds]
+
+or any Node 22.`);
+  process.exit(2);
+}
+
 const [, , tokenFile, secsArg, langArg] = process.argv;
 if (!tokenFile) {
   console.error("usage: probe-dictation.js <token-file> [seconds] [language]");

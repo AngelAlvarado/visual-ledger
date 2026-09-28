@@ -25,8 +25,13 @@ and `x-app: vscode` headers, linear16/16 kHz/mono audio, and the frame types
 
 ## Find out in one command
 
+Run it from anywhere, with an absolute path, and with a Node 22 — the `node`
+on PATH in this devcontainer is v20 and has no global `WebSocket`:
+
 ```bash
-node scripts/probe-dictation.js /path/to/token-file 12
+/home/node/.vscode-server/bin/*/node \
+  /workspace/visual-ledger/scripts/probe-dictation.js \
+  /path/to/token-file 12
 ```
 
 Streams your microphone for 12 seconds and prints every frame. Reading it:
