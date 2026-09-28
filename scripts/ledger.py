@@ -689,19 +689,35 @@ h1{font-size:clamp(26px,3.6vw,36px);font-weight:600;letter-spacing:-.022em;line-
  border-radius:7px;background:var(--panel);color:var(--ink);font:inherit;font-size:14px;padding:9px 11px}
 .compose textarea:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
 /* Dictation. Three states, because a mic that does not visibly hear you is
-   indistinguishable from a broken one: idle, connecting, listening. */
-.btn.mic{display:inline-flex;align-items:center;gap:6px}
-.btn.mic .dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
-.btn.mic[data-state="connecting"] .dot{background:var(--warn);animation:micblink .8s infinite}
-.btn.mic[data-state="listening"]{border-color:var(--crit);color:var(--crit)}
-.btn.mic[data-state="listening"] .dot{background:var(--crit);animation:micpulse 1.2s infinite}
+   indistinguishable from a broken one: idle, connecting, listening.
+
+   The button sits in the textarea's top-right corner rather than in the
+   action row: it acts on the box, not on the claim, and the action row is
+   already six buttons of decisions you have to read. A bare glyph there is
+   recognised without being read. */
+.tawrap{position:relative}
+.tawrap textarea{padding-right:38px}     /* keep text clear of the glyph */
+button.mic{position:absolute;top:7px;right:7px;width:26px;height:26px;padding:0;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  border:1px solid transparent;border-radius:7px;background:transparent;
+  color:var(--faint);transition:color .15s,background .15s,border-color .15s}
+button.mic:hover{background:var(--code);color:var(--muted)}
+button.mic:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button.mic .micico{flex:none;pointer-events:none}
+button.mic[data-state="connecting"]{color:var(--warn);border-color:var(--warn)}
+button.mic[data-state="connecting"] .micico{animation:micblink .8s infinite}
+/* Live state is the accent -- the same colour as the primary action. Red
+   reads as an error, and listening is not one. */
+button.mic[data-state="listening"]{color:var(--accent);border-color:var(--accent);
+  background:var(--code);animation:micpulse 1.4s infinite}
+button.mic[disabled]{opacity:.35;cursor:default}
 @keyframes micblink{0%,100%{opacity:1}50%{opacity:.25}}
-@keyframes micpulse{0%{box-shadow:0 0 0 0 rgba(220,80,80,.55)}
-                    70%{box-shadow:0 0 0 7px rgba(220,80,80,0)}
-                    100%{box-shadow:0 0 0 0 rgba(220,80,80,0)}}
+@keyframes micpulse{0%{box-shadow:0 0 0 0 rgba(95,191,199,.5)}
+                    70%{box-shadow:0 0 0 6px rgba(95,191,199,0)}
+                    100%{box-shadow:0 0 0 0 rgba(95,191,199,0)}}
 /* Interim text is not yours yet -- the service can still revise it, so it
    reads as provisional until an endpoint frame commits it into the textarea. */
-.compose textarea.dictating{border-color:var(--crit)}
+.compose textarea.dictating{border-color:var(--accent)}
 .interim{color:var(--faint);font-style:italic;padding:5px 2px 0;font-size:12px;min-height:1em}
 .micerr{color:var(--crit);font-size:12px;padding:5px 2px 0}
 /* Artifact chip. Neutral while the claim is open, green once the file has
@@ -928,7 +944,7 @@ function openComposer(id){
   let c=el.querySelector(".compose");
   if(c){c.querySelector("textarea").focus();return;}
   c=document.createElement("div"); c.className="compose";
-  c.innerHTML=`<textarea placeholder="What's wrong with this, or what does it need?"></textarea>
+  c.innerHTML=`<div class="tawrap"><textarea placeholder="What's wrong with this, or what does it need?"></textarea><button class="mic" data-mic="1" type="button" data-state="idle" title="Dictate (Alt+D)" aria-label="Dictate"><svg class="micico" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 18v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
     <div class="crow2">
       <button class="btn primary" data-s="note">Add note</button>
       <button class="btn" data-s="wrong">Mark wrong</button>
@@ -936,8 +952,6 @@ function openComposer(id){
       <button class="btn" data-s="parked">Park</button>
       <button class="btn" data-s="dismissed">Dismiss</button>
       <button class="btn" data-s="cancel">Cancel</button>
-      <button class="btn mic" data-mic="1" type="button" data-state="idle"
-        title="Dictate (Alt+D)"><span class="dot"></span>Dictate</button>
       <span class="hint">&#8984;/Ctrl + Enter to add a note</span></div>
     <div class="interim" hidden></div>
     `;
@@ -952,10 +966,14 @@ function openComposer(id){
     await submitOne(id,st,text||DEFAULT_TEXT[st]||"Confirmed.");
     render();
   };
-  c.querySelectorAll("button").forEach(b=>b.onclick=()=>{
-    if(b.dataset.mic) return;            // the mic owns its own handler
+  // Skip the mic ENTIRELY rather than guarding inside the handler: assigning
+  // b.onclick here would clobber the one attachDictation just set, and the
+  // button would silently do nothing.
+  c.querySelectorAll("button").forEach(b=>{
+    if(b.dataset.mic) return;
+    b.onclick=()=>{
     const s=b.dataset.s;
-    if(s==="cancel"){stopDictation(c);c.remove();return;} submit(s);});
+    if(s==="cancel"){stopDictation(c);c.remove();return;} submit(s);};});
   ta.onkeydown=ev=>{if((ev.metaKey||ev.ctrlKey)&&ev.key==="Enter")submit("note");
                     if(ev.key==="Escape")c.remove();};
 }
@@ -983,13 +1001,15 @@ function openComposer(id){
    textarea. */
 const DICT={ch:null, box:null, ta:null, seq:0};
 
-function micBtn(box){ return box.querySelector(".btn.mic"); }
+function micBtn(box){ return box.querySelector("button.mic"); }
 
 function micState(box,state,err){
   const b=micBtn(box); if(!b) return;
   b.dataset.state=state;
-  b.lastChild.textContent = state==="listening" ? "Stop"
-                          : state==="connecting" ? "Starting" : "Dictate";
+  const label = state==="listening" ? "Stop dictating"
+              : state==="connecting" ? "Starting dictation" : "Dictate (Alt+D)";
+  b.title=label; b.setAttribute("aria-label",label);
+  b.setAttribute("aria-pressed",String(state==="listening"));
   if(DICT.ta) DICT.ta.classList.toggle("dictating",state==="listening");
   const iv=box.querySelector(".interim");
   if(iv && state==="idle"){ iv.hidden=true; iv.textContent=""; }
@@ -1004,6 +1024,7 @@ function attachDictation(box,ta){
   if(!VSC){            // file:// or a preview tab: no extension to ask
     b.disabled=true;
     b.title="Dictation needs the VS Code panel";
+    b.setAttribute("aria-label",b.title);
     b.style.opacity=.45;
     return;
   }
@@ -1062,21 +1083,20 @@ function openBatch(){
   const ids=CLAIMS.filter(c=>TURNS[c.id]==="you").map(c=>c.id);
   if(!ids.length){return;}
   const d=document.createElement("div"); d.className="compose batch";
-  d.innerHTML=`<textarea placeholder="One reply for all ${ids.length}: ${ids.join(", ")}"></textarea>
+  d.innerHTML=`<div class="tawrap"><textarea placeholder="One reply for all ${ids.length}: ${ids.join(", ")}"></textarea><button class="mic" data-mic="1" type="button" data-state="idle" title="Dictate (Alt+D)" aria-label="Dictate"><svg class="micico" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 18v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
     <div class="crow2">
       <button class="btn primary" data-s="note">Note on all ${ids.length}</button>
       <button class="btn" data-s="parked">Park all</button>
       <button class="btn" data-s="dismissed">Dismiss all</button>
       <button class="btn" data-s="cancel">Cancel</button>
-      <button class="btn mic" data-mic="1" type="button" data-state="idle"
-        title="Dictate (Alt+D)"><span class="dot"></span>Dictate</button>
       <span class="hint">Ends your turn on every one of them at once.</span></div>
     <div class="interim" hidden></div>`;
   box.appendChild(d);
   const ta=d.querySelector("textarea"); ta.focus();
   attachDictation(d,ta);
-  d.querySelectorAll("button").forEach(b=>b.onclick=async()=>{
-    if(b.dataset.mic) return;
+  d.querySelectorAll("button").forEach(b=>{
+    if(b.dataset.mic) return;            // see openComposer: never clobber it
+    b.onclick=async()=>{
     const st=b.dataset.s;
     if(st==="cancel"){stopDictation(d);box.innerHTML="";return;}
     const text=ta.value.trim();
@@ -1085,7 +1105,7 @@ function openBatch(){
       await submitOne(id,st,text||DEFAULT_TEXT[st]||"Noted.");
     }
     box.innerHTML=""; render();
-  });
+  };});
 }
 
 /* ---- wiring -------------------------------------------------------- */
