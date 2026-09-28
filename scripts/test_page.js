@@ -151,13 +151,18 @@ function main() {
       removeItem: (k) => { delete store[k]; },
     },
     acquireVsCodeApi: () => ({ postMessage() {}, setState() {} }),
+    // The page's own functions are local to the new Function() scope below,
+    // so anything worth testing directly has to be handed out deliberately.
+    __export: {},
     setTimeout: () => 0, clearTimeout: () => {},
     console,
   };
 
   const fail = [];
   try {
-    new Function(...Object.keys(sandbox), script)(...Object.values(sandbox));
+    const epilogue = ";try{__export.commitSpeech=commitSpeech;__export.DICT=DICT;}"
+                   + "catch(e){/* page without dictation */}";
+    new Function(...Object.keys(sandbox), script + epilogue)(...Object.values(sandbox));
   } catch (e) {
     console.error(`LOAD FAILED: ${e.name}: ${e.message}`);
     process.exit(1);
@@ -211,6 +216,31 @@ function main() {
   }
   if (arcBody && inArchive.some((n) => n._classes.has("hide"))) {
     fail.push("archived card is hidden inside the Archive");
+  }
+
+  // The cumulative-vs-append bug, tested directly against the page's own
+  // commitSpeech. The live backend restates the WHOLE transcript in every
+  // frame; appending that instead of replacing duplicates it quadratically,
+  // and it is invisible until someone actually dictates. Driving this through
+  // a real composer would need an HTML parser in this shim, so call the
+  // function the vm context already exposes.
+  const X = sandbox.__export;
+  if (typeof X.commitSpeech === "function" && X.DICT) {
+    const ta = { value: "", selectionStart: 0, selectionEnd: 0,
+                 classList: { toggle() {} } };
+    X.DICT.ta = ta; X.DICT.base = "typed "; X.DICT.said = "";
+    X.commitSpeech("one two", true);
+    X.commitSpeech("one two three", true);          // cumulative: replaces
+    if (ta.value !== "typed one two three") {
+      fail.push(`cumulative commit gave ${JSON.stringify(ta.value)}, expected "typed one two three"`);
+    }
+    ta.value = ""; X.DICT.base = ""; X.DICT.said = "";
+    X.commitSpeech("first", false);
+    X.commitSpeech("second", false);                // incremental: appends
+    if (ta.value !== "first second") {
+      fail.push(`incremental commit gave ${JSON.stringify(ta.value)}, expected "first second"`);
+    }
+    X.DICT.ta = null;
   }
 
   // Dictation: the page must survive a frame from the extension without

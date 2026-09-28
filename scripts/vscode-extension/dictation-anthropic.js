@@ -26,10 +26,17 @@
  *    headers  Authorization: Bearer <claude.ai token>
  *             x-app: vscode
  *    send     raw linear16 PCM frames, 16 kHz, mono, little-endian
- *    receive  {type:"TranscriptInterim"|"TranscriptText", data:"..."}   partial
- *             {type:"TranscriptEndpoint"}                              commit
+ *    receive  {type:"TranscriptText", data:"..."}   the transcript SO FAR
  *             {type:"TranscriptError", description:"..."}
  *             {type:"error", message:"..."}
+ *
+ *  OBSERVED (probe run, 2026-09-27): `data` is CUMULATIVE -- every frame
+ *  restates the whole session, not the latest phrase ("Hello," then
+ *  "Hello, hello," then "Hello, hello, hello."). No TranscriptEndpoint frame
+ *  ever arrived across a 12s run. So there is no per-utterance commit signal:
+ *  the text is one growing string, and the commit point is when the user
+ *  stops. Frames are emitted with cumulative=true and the page replaces
+ *  rather than appends.
  *
  *  Audio capture is `rec` (SoX), which is present in this devcontainer and
  *  verified to produce 16 kHz mono (64000 bytes in 2s). It is NOT present on
@@ -41,19 +48,19 @@ const fs = require("fs");
 
 const ENDPOINT = "wss://api.anthropic.com/api/ws/speech_to_text/voice_stream";
 
-// UNKNOWN (1): the extension sends a frame immediately on open, and repeats
-// it on an interval. Its contents could not be read. It is plausibly a
-// keepalive or a config/settings frame. If the service needs a config frame
-// before it will transcribe, this is the gap.
-const OPEN_FRAME = null;          // e.g. JSON.stringify({ type: "..." })
+// ANSWERED by the probe: a config frame on open is NOT required -- the socket
+// transcribed immediately without one. The real client does send something on
+// open, but it is not a precondition, so nothing is sent here.
+const OPEN_FRAME = null;
 
-// UNKNOWN (2): the repeat interval for the frame above. 15s is a guess in the
-// usual range for an idle websocket; the real value is in the bundle.
-const KEEPALIVE_MS = 15000;
+// STILL UNKNOWN: whether an idle socket is dropped, and after how long. The
+// probe only ran 12s, which proves nothing about a ~30s timeout. Left unset
+// rather than guessed; if long dictations die at a consistent interval, this
+// is the first thing to try.
+const KEEPALIVE_MS = 0;           // 0 = send nothing
 
-// UNKNOWN (3): the extension sends an `anthropic-client-platform` header. Its
-// value could not be read. Omitted rather than guessed -- a wrong value is
-// likelier to be rejected than a missing one.
+// ANSWERED by the probe: the `anthropic-client-platform` header is NOT
+// required. Authorization plus x-app was enough to open and transcribe.
 
 /** Read the token from a file, and never log it or return it to a caller.
  *  A path is used rather than a settings string so the secret does not end
@@ -110,6 +117,9 @@ function anthropicBackend(channel, cb, opts) {
   cb.onState("connecting");
 
   let ws, stopRec = null, keepalive = null, closed = false;
+  // The running transcript. Committed when the user stops, because the
+  // service sends no per-phrase commit signal (see OBSERVED above).
+  let transcript = "";
   // Audio recorded before the socket opens would otherwise be dropped, and
   // the first word is exactly what people lose.
   const pending = [];
@@ -117,6 +127,9 @@ function anthropicBackend(channel, cb, opts) {
   const shutdown = () => {
     if (closed) return;
     closed = true;
+    // Stopping is the only commit point there is: hand over whatever was
+    // transcribed, or pressing stop would throw the whole dictation away.
+    if (transcript) { try { cb.onText(transcript, true, true); } catch (e) { /* gone */ } }
     if (keepalive) clearInterval(keepalive);
     if (stopRec) stopRec();
     try { if (ws && ws.readyState <= 1) ws.close(); } catch (e) { /* gone */ }
@@ -134,10 +147,12 @@ function anthropicBackend(channel, cb, opts) {
 
   ws.addEventListener("open", () => {
     if (closed) return;
-    if (OPEN_FRAME) ws.send(OPEN_FRAME);
-    if (OPEN_FRAME) keepalive = setInterval(() => {
-      if (ws.readyState === 1) ws.send(OPEN_FRAME);
-    }, KEEPALIVE_MS);
+    if (OPEN_FRAME) {
+      ws.send(OPEN_FRAME);
+      if (KEEPALIVE_MS) keepalive = setInterval(() => {
+        if (ws.readyState === 1) ws.send(OPEN_FRAME);
+      }, KEEPALIVE_MS);
+    }
     while (pending.length) ws.send(pending.shift());
     cb.onState("listening");
   });
@@ -150,10 +165,16 @@ function anthropicBackend(channel, cb, opts) {
     switch (m.type) {
       case "TranscriptInterim":
       case "TranscriptText":
-        if (m.data) cb.onText(m.data, false);
+        // Cumulative: this IS the transcript, not an addition to it.
+        if (m.data) { transcript = m.data; cb.onText(m.data, false, true); }
         break;
       case "TranscriptEndpoint":
-        if (m.data) cb.onText(m.data, true);
+        // Never seen in practice, but honour it if the service starts
+        // sending one -- it would be a genuine phrase boundary.
+        if (m.data || transcript) {
+          transcript = m.data || transcript;
+          cb.onText(transcript, true, true);
+        }
         break;
       case "TranscriptError":
         cb.onError(m.description || "Transcription error."); shutdown(); break;

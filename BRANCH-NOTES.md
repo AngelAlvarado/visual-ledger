@@ -6,22 +6,45 @@ one the Claude Code extension uses for its own dictation.
 **Not merged, not verified end to end, and not the default.** `main` keeps the
 fake backend. This branch adds a second option behind a setting.
 
-## Why it might not work
+## It works. Probe run, 2026-09-27
 
-Three parts of the handshake could not be read out of the extension bundle:
+```
+ 0.49s OPEN -- speak now
+ 3.699s frame TranscriptText "Hello,"
+ 4.698s frame TranscriptText "Hello, hello, hello."
+ 9.811s frame TranscriptText "Hello, hello, hello. One, two, three. This seems to be working."
+12.018s time up
+```
 
-1. **A frame sent on open, and repeated on an interval.** Contents unknown.
-   Plausibly a keepalive, plausibly a config frame the service requires before
-   it will transcribe anything. `OPEN_FRAME = null` in the code.
-2. **That interval.** 15s is a guess.
-3. **An `anthropic-client-platform` header.** Value unknown, so it is omitted
-   rather than guessed -- a wrong value is likelier to be rejected than a
-   missing one.
+Two of the three unknowns turned out not to matter:
 
-What *is* known: the URL and its query parameters, the `Authorization: Bearer`
-and `x-app: vscode` headers, linear16/16 kHz/mono audio, and the frame types
-(`TranscriptInterim`, `TranscriptText`, `TranscriptEndpoint`,
-`TranscriptError`, `error`).
+| Unknown | Answer |
+|---|---|
+| Config frame on open | **Not required.** It transcribed without one |
+| `anthropic-client-platform` header | **Not required.** `Authorization` + `x-app` sufficed |
+| Keepalive interval | **Still open.** 12s proves nothing about a ~30s idle timeout |
+
+### The finding that mattered
+
+`data` is **cumulative** -- every frame restates the whole session, not the
+latest phrase -- and **no `TranscriptEndpoint` ever arrived**. So there is no
+per-phrase commit signal. Two consequences, both now handled:
+
+- The transcript is committed when the user presses **stop**, since that is
+  the only commit point the service offers.
+- Frames carry `cumulative: true` and the page **replaces** rather than
+  appends. Appending cumulative text duplicates everything before it, and
+  `test_page.js` now fails on exactly that (verified by mutation: it produces
+  `"typed one two one two three"`).
+
+Without the probe this would have shipped as a composer that showed grey text
+forever and never put a word in the box.
+
+### Still to establish
+
+Whether an idle socket is dropped, and after how long. Run the probe for 60s
+with a long silence in the middle; if it dies at a consistent interval,
+`KEEPALIVE_MS` is the knob.
 
 ## Find out in one command
 
