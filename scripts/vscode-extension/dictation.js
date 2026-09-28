@@ -63,12 +63,24 @@ function fakeBackend(channel, cb) {
   return () => { stopped = true; if (timer) clearTimeout(timer); };
 }
 
-/** Which backend to use. `claudeLedger.dictation.backend`: "fake" (default)
- *  or "off". A real backend registers here when one exists. */
+/** Which backend to use. `claudeLedger.dictation.backend`:
+ *    "fake"      scripted placeholder text (default)
+ *    "anthropic" the real socket -- UNVERIFIED, undocumented, see that file
+ *    "off"       no button
+ *  Returns a function with the signature at the top of this file, already
+ *  bound to whatever options its backend needs. */
 function pick(vscode) {
-  const mode = vscode.workspace.getConfiguration("claudeLedger")
-    .get("dictation.backend") || "fake";
+  const cfg = vscode.workspace.getConfiguration("claudeLedger");
+  const mode = cfg.get("dictation.backend") || "fake";
   if (mode === "off") return null;
+  if (mode === "anthropic") {
+    const { anthropicBackend } = require("./dictation-anthropic");
+    const opts = {
+      tokenPath: cfg.get("dictation.tokenPath") || "",
+      language: cfg.get("dictation.language") || "en",
+    };
+    return (channel, cb) => anthropicBackend(channel, cb, opts);
+  }
   return fakeBackend;
 }
 
