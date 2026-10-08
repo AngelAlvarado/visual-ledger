@@ -102,6 +102,15 @@ first). That line lands in your context right before you compose the reply —
 it is the list chat must defer to. If something you are about to ask is not
 on it, log the claim and re-render before replying.
 
+## What a composer can take
+
+Every composer in the panel accepts three things, and Angel may use any of
+them: typed text, **dictation** (the microphone in the box's top-right
+corner), and **a pasted image**. A pasted screenshot is saved beside the
+conversation and shows up inline in the thread, so a comment may be mostly
+picture. Read those as part of the comment -- the screenshot is usually the
+evidence for the claim being wrong.
+
 ## Acting on comments
 
 Comments arrive automatically in a `<ledger-comments>` block on the next

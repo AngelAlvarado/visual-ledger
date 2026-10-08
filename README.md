@@ -144,6 +144,29 @@ start(channel, { onText, onState, onError }) -> stop()
 
 and gets registered in `pick()`. The panel does not change.
 
+### Pasting a screenshot
+
+Paste an image into any composer and it is saved under the claim you are
+commenting on:
+
+    .claude/ledgers/<group>/<slug>/C8/ab12cd34ef56.png
+
+so the folder says what the screenshot is about without opening it. A batch
+reply belongs to several claims at once and falls back to a shared `images/`
+bucket. A markdown reference is dropped at the caret; it renders inline under
+the comment, and clicking it toggles full size.
+
+Named by content hash, so pasting the same image twice costs one file. Up to
+8MB per image. Images are gitignored along with `comments.md` -- they are
+part of your working comments, not of the committed claim list.
+
+They are inlined into `index.html` as data URIs rather than referenced by
+path, because the page has to work in the webview, in a `file://` tab and
+under `--serve`, and only one of those resolves a relative path to disk.
+Past 12MB of images on one page, further references stay as plain text.
+
+Pasting needs the VS Code panel; in a read-only context the image is dropped.
+
 ### Reading the panel
 
 - **Purple bar** — what is waiting on you, with jump chips. Claude sets this.

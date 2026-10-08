@@ -8,3 +8,12 @@ __pycache__/
 .claude/ledgers/**/.turns-cache.json
 .ledger-*.json
 *.token
+
+# Pasted screenshots, filed under the claim they belong to (C8/ab12.png) or
+# a shared bucket for batch replies. Ignored by extension rather than folder
+# name, since the folder is a claim id.
+.claude/ledgers/**/*.png
+.claude/ledgers/**/*.jpg
+.claude/ledgers/**/*.jpeg
+.claude/ledgers/**/*.gif
+.claude/ledgers/**/*.webp
