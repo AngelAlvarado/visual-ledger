@@ -1863,6 +1863,19 @@ def main(argv):
                       for k in KINDS if any(c["kind"] == k for c in claims))
     print(f"wrote {out}\n  {len(claims)} claims ({kinds}), {len(comments)} comments on disk")
 
+    # Turn-end gate backstop (SKILL.md "Turn-end gate"): name every open claim
+    # Angel has not commented on, focus first. Claude reads this right before
+    # composing its reply — anything it is about to ask in chat must be on
+    # this list (or become a claim first), and the chat line only points here.
+    meta = parse_ledger(conv / "ledger.md")[0]
+    answered = {c["claim"] for c in comments if c["author"].lower() != "claude"}
+    waiting = [c["id"] for c in claims if c["kind"] == "open" and c["id"] not in answered]
+    if waiting:
+        focus = [f.strip() for f in meta.get("focus", "").split(",") if f.strip()]
+        ordered = [c for c in focus if c in waiting] + [c for c in waiting if c not in focus]
+        tag = f" (focus: {', '.join(f for f in focus if f in waiting)})" if any(f in waiting for f in focus) else ""
+        print(f"  ⏳ waiting on Angel: {', '.join(ordered)}{tag} — the reply should point at the panel, not restate these")
+
     # Drift goes to the terminal as well as the panel: Claude reads this
     # output after every render, which is the point at which a forgotten
     # artifact edit is still cheap to make.

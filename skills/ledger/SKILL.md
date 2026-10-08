@@ -85,6 +85,23 @@ setting `focus:` mid-turn moves his attention with nothing to re-run.
 
 With no `focus:`, every `open` claim without a comment is implicitly the ask.
 
+## Turn-end gate
+
+Before sending any reply, scan it for sentences that wait on Angel — a
+question, an option menu, "say the word / your call / on your word / want me
+to…", or an either/or ending. Each one must already exist as an `open` claim
+(with `focus:` set if it is actionable now); the chat sentence may then only
+*point at the panel*, never restate the choice. A turn that ends by offering
+Angel decisions in prose has skipped the ledger no matter how short it is —
+the ~6-line rule is about reasoning; this gate is about *pending decisions*,
+and it has no length threshold.
+
+The renderer backs this up mechanically: after every render it prints a
+`⏳ waiting on Angel:` line naming the open, uncommented claims (focus
+first). That line lands in your context right before you compose the reply —
+it is the list chat must defer to. If something you are about to ask is not
+on it, log the claim and re-render before replying.
+
 ## Acting on comments
 
 Comments arrive automatically in a `<ledger-comments>` block on the next
