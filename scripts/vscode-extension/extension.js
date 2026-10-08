@@ -326,6 +326,35 @@ function wirePanel(context, panel, conv, panels) {
           () => vscode.window.showInformationMessage(
             "Ledger: comments copied - paste into Claude."));
       });
+    } else if (msg && msg.type === "image:save" && msg.id) {
+      // The page cannot write files, so pasted screenshots land here. Named
+      // by content hash: pasting the same image twice costs one file, and
+      // the name can never collide with another conversation's.
+      try {
+        const m = /^data:(image\/[a-z+]+);base64,(.+)$/i.exec(msg.dataUrl || "");
+        if (!m) throw new Error("Not an image.");
+        const EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
+                      "image/webp": "webp" };
+        const ext = EXT[m[1].toLowerCase()];
+        if (!ext) throw new Error(`${m[1]} is not a supported image type.`);
+        const buf = Buffer.from(m[2], "base64");
+        const hash = require("crypto").createHash("sha1").update(buf)
+          .digest("hex").slice(0, 12);
+        // Filed under the claim it was pasted into, so the folder name says
+        // what the screenshot is about. A batch reply belongs to several
+        // claims at once and falls back to a shared bucket.
+        const folder = /^C\d+$/.test(String(msg.claim || "")) ? msg.claim : "images";
+        const dir = path.join(panel.current, folder);
+        fs.mkdirSync(dir, { recursive: true });
+        const name = `${hash}.${ext}`;
+        const abs = path.join(dir, name);
+        if (!fs.existsSync(abs)) fs.writeFileSync(abs, buf);
+        panel.webview.postMessage({ type: "image:saved", id: msg.id,
+                                    path: `${folder}/${name}`, name });
+      } catch (err) {
+        panel.webview.postMessage({ type: "image:failed", id: msg.id,
+                                    error: String(err.message || err) });
+      }
     } else if (msg && msg.type === "open" && msg.path) {
       vscode.window.showTextDocument(vscode.Uri.file(msg.path));
     }

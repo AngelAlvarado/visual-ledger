@@ -334,6 +334,52 @@ def drift(claims, comments):
     return out
 
 
+# A screenshot is filed under the claim it belongs to -- C8/ab12cd.png --
+# so the folder says what the picture is about without opening it. `images/`
+# is the fallback for a batch reply, which belongs to several claims at once.
+IMG_RE = re.compile(r"!\[[^\]]*\]\(((?:C\d+|images)/[A-Za-z0-9._-]+)\)")
+IMG_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+             ".gif": "image/gif", ".webp": "image/webp"}
+# A screenshot is the most useful thing to paste into a review comment and the
+# most annoying to describe in words. They are inlined as data URIs rather
+# than referenced by path because the page has to work in three places -- the
+# VS Code webview, a file:// tab and `--serve` -- and only one of those can
+# resolve a relative path to disk. index.html is generated and gitignored, so
+# the size it costs is not carried anywhere.
+IMG_BUDGET = 12 * 1024 * 1024      # total per page, beyond which refs stay text
+
+
+def inline_images(comments, conv):
+    """Replace `![](images/x.png)` in comment text with inline attachments."""
+    import base64
+    spent = 0
+    for c in comments:
+        shots = []
+
+        def take(m):
+            nonlocal spent
+            rel = m.group(1)
+            f = conv / rel
+            mime = IMG_TYPES.get(f.suffix.lower())
+            if not mime or not f.exists():
+                return m.group(0)            # leave the text as written
+            try:
+                raw = f.read_bytes()
+            except OSError:
+                return m.group(0)
+            if spent + len(raw) > IMG_BUDGET:
+                return m.group(0)            # over budget: keep it as a path
+            spent += len(raw)
+            shots.append({"src": f"data:{mime};base64,"
+                                 + base64.b64encode(raw).decode(),
+                          "name": f.name})
+            return ""
+        c["text"] = IMG_RE.sub(take, c["text"]).strip()
+        if shots:
+            c["images"] = shots
+    return comments
+
+
 def parse_comments(path):
     if not path.exists():
         return []
@@ -726,6 +772,12 @@ button.mic[disabled]{opacity:.35;cursor:default}
 .tag.art.ok{color:var(--ok);border-color:var(--ok)}
 .tag.art.drift{color:var(--crit);border-color:var(--crit);font-weight:600}
 .tag.art.missing{color:var(--warn);border-color:var(--warn)}
+/* Pasted screenshots. Capped in height so a tall one does not push the rest
+   of the thread off the screen; click opens it at full size. */
+.shot{display:block;max-width:100%;max-height:300px;margin:8px 0 2px;cursor:zoom-in;
+  border:1px solid var(--line);border-radius:7px;background:var(--code)}
+.shot.full{max-height:none;cursor:zoom-out}
+.pasting{opacity:.6}
 .crow2{display:flex;gap:8px;margin-top:9px;align-items:center;flex-wrap:wrap}
 .hint{font-size:11.5px;color:var(--faint)}
 .empty{color:var(--faint);text-align:center;padding:40px 0;font-size:14px}
@@ -876,6 +928,7 @@ function render(){
         ${c.pending?'<span class="pend">unsaved</span>':""}</div>
         <div class="cbody${c.text.length>420?" clip":""}">${esc(c.text)}</div>
         ${c.text.length>420?`<button class="more">Show all ${c.text.length.toLocaleString()} characters</button>`:""}
+        ${(c.images||[]).map(im=>`<img class="shot" src="${im.src}" alt="${esc(im.name)}" title="${esc(im.name)} -- click to open full size">`).join("")}
         </div>`;}).join("");
     /* The page-bottom Send bar is easy to miss from a card halfway down, so
        the claim that needs sending carries its own button. */
@@ -944,7 +997,7 @@ function openComposer(id){
   let c=el.querySelector(".compose");
   if(c){c.querySelector("textarea").focus();return;}
   c=document.createElement("div"); c.className="compose";
-  c.innerHTML=`<div class="tawrap"><textarea placeholder="What's wrong with this, or what does it need?"></textarea><button class="mic" data-mic="1" type="button" data-state="idle" title="Dictate (Alt+D)" aria-label="Dictate"><svg class="micico" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 18v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
+  c.innerHTML=`<div class="tawrap"><textarea placeholder="What's wrong with this, or what does it need?"></textarea></div>
     <div class="crow2">
       <button class="btn primary" data-s="note">Add note</button>
       <button class="btn" data-s="wrong">Mark wrong</button>
@@ -957,7 +1010,7 @@ function openComposer(id){
     `;
   el.appendChild(c);
   const ta=c.querySelector("textarea"); ta.focus();
-  attachDictation(c,ta);
+  attachDictation(c,ta); attachPaste(c,ta,id);
   const submit=async st=>{
     const text=ta.value.trim();
     if(!text && st!=="ok" && st!=="dismissed" && st!=="parked"){ta.focus();return;}
@@ -999,6 +1052,13 @@ function openComposer(id){
    service revises interim results, and watching your own sentence rewrite
    itself under the cursor is unpleasant; only committed text lands in the
    textarea. */
+const MIC_SVG='<svg class="micico" viewBox="0 0 24 24" width="15" height="15" '
+ +'aria-hidden="true" focusable="false">'
+ +'<rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor"/>'
+ +'<path d="M5 11a7 7 0 0 0 14 0" fill="none" stroke="currentColor" '
+ +'stroke-width="2" stroke-linecap="round"/>'
+ +'<path d="M12 18v3" fill="none" stroke="currentColor" stroke-width="2" '
+ +'stroke-linecap="round"/></svg>';
 const DICT={ch:null, box:null, ta:null, seq:0, base:"", said:""};
 
 function micBtn(box){ return box.querySelector("button.mic"); }
@@ -1019,13 +1079,27 @@ function micState(box,state,err){
   else if(e) e.remove();
 }
 
+/* Give a textarea a microphone. The button is BUILT here rather than written
+   into each composer's template: it was copy-pasted into two of them, and the
+   third text box someone adds would silently have no voice. One call is now
+   the whole contract -- wrap the textarea in .tawrap and call this. */
 function attachDictation(box,ta){
-  const b=micBtn(box); if(!b) return;
+  if(!ta) return;
+  let wrap=ta.parentElement;
+  if(!wrap || !wrap.classList.contains("tawrap")) return;
+  let b=wrap.querySelector("button.mic");
+  if(!b){
+    b=document.createElement("button");
+    b.className="mic"; b.type="button";
+    b.dataset.mic="1"; b.dataset.state="idle";
+    b.title="Dictate (Alt+D)"; b.setAttribute("aria-label","Dictate");
+    b.innerHTML=MIC_SVG;
+    wrap.appendChild(b);
+  }
   if(!VSC){            // file:// or a preview tab: no extension to ask
     b.disabled=true;
     b.title="Dictation needs the VS Code panel";
     b.setAttribute("aria-label",b.title);
-    b.style.opacity=.45;
     return;
   }
   b.onclick=()=>{ (DICT.box===box && DICT.ch) ? stopDictation(box) : startDictation(box,ta); };
@@ -1033,6 +1107,66 @@ function attachDictation(box,ta){
     if(ev.altKey && (ev.key==="d"||ev.key==="D")){ev.preventDefault();b.onclick();}
   });
 }
+
+/* ---- pasting an image ------------------------------------------------
+   A screenshot is the most useful thing to put in a review comment and the
+   worst thing to describe in prose. Paste goes to the extension, which is
+   the only side that can write a file; the page gets back a relative path
+   and drops a markdown reference at the caret. The renderer inlines it on
+   the next render.
+
+   Read-only contexts (file://, a preview tab) have no extension to ask, so
+   paste falls through to the browser's default and the image is dropped --
+   the same limit that already applies to commenting there. */
+const PASTE_MAX = 8 * 1024 * 1024;
+let pasteSeq = 0;
+const pasteWaiting = {};
+
+function attachPaste(box,ta,claimId){
+  if(!ta || !VSC) return;
+  ta.addEventListener("paste",ev=>{
+    const items=[...((ev.clipboardData||{}).items||[])];
+    const img=items.find(i=>i.kind==="file" && /^image\//.test(i.type));
+    if(!img) return;                       // ordinary text paste: leave it
+    const file=img.getAsFile(); if(!file) return;
+    ev.preventDefault();
+    if(file.size>PASTE_MAX){
+      micState(box,"idle","That image is "+(file.size/1048576).toFixed(1)
+               +"MB; the limit is "+(PASTE_MAX/1048576)+"MB.");
+      return;
+    }
+    const r=new FileReader();
+    r.onload=()=>{
+      const id="p"+(++pasteSeq);
+      pasteWaiting[id]={ta,box};
+      ta.classList.add("pasting");
+      VSC.postMessage({type:"image:save",id,dataUrl:String(r.result),
+                       mime:file.type,claim:claimId||""});
+    };
+    r.onerror=()=>micState(box,"idle","Could not read that image.");
+    r.readAsDataURL(file);
+  });
+}
+
+/* Drop the reference where the caret was, so a comment can mix prose and
+   screenshots rather than collecting images at the end. */
+function insertAtCaret(ta,text){
+  const a=ta.selectionStart??ta.value.length, b=ta.selectionEnd??a;
+  ta.value=ta.value.slice(0,a)+text+ta.value.slice(b);
+  ta.selectionStart=ta.selectionEnd=a+text.length;
+  ta.focus();
+}
+
+window.addEventListener("message",ev=>{
+  const m=ev.data||{};
+  if(m.type!=="image:saved" && m.type!=="image:failed") return;
+  const w=pasteWaiting[m.id]; if(!w) return;
+  delete pasteWaiting[m.id];
+  w.ta.classList.remove("pasting");
+  if(m.type==="image:failed"){ micState(w.box,"idle",m.error||"Could not save that image."); return; }
+  const sep = w.ta.value && !/\s$/.test(w.ta.value) ? "\n" : "";
+  insertAtCaret(w.ta, sep+"!["+(m.name||"screenshot")+"]("+m.path+")\n");
+});
 
 function startDictation(box,ta){
   if(DICT.ch) stopDictation(DICT.box);       // one mic, one composer
@@ -1094,7 +1228,7 @@ function openBatch(){
   const ids=CLAIMS.filter(c=>TURNS[c.id]==="you").map(c=>c.id);
   if(!ids.length){return;}
   const d=document.createElement("div"); d.className="compose batch";
-  d.innerHTML=`<div class="tawrap"><textarea placeholder="One reply for all ${ids.length}: ${ids.join(", ")}"></textarea><button class="mic" data-mic="1" type="button" data-state="idle" title="Dictate (Alt+D)" aria-label="Dictate"><svg class="micico" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 18v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
+  d.innerHTML=`<div class="tawrap"><textarea placeholder="One reply for all ${ids.length}: ${ids.join(", ")}"></textarea></div>
     <div class="crow2">
       <button class="btn primary" data-s="note">Note on all ${ids.length}</button>
       <button class="btn" data-s="parked">Park all</button>
@@ -1104,7 +1238,7 @@ function openBatch(){
     <div class="interim" hidden></div>`;
   box.appendChild(d);
   const ta=d.querySelector("textarea"); ta.focus();
-  attachDictation(d,ta);
+  attachDictation(d,ta); attachPaste(d,ta,null);   // batch: shared bucket
   d.querySelectorAll("button").forEach(b=>{
     if(b.dataset.mic) return;            // see openComposer: never clobber it
     b.onclick=async()=>{
@@ -1121,6 +1255,8 @@ function openBatch(){
 
 /* ---- wiring -------------------------------------------------------- */
 document.addEventListener("click",ev=>{
+  const shot=ev.target.closest(".shot");
+  if(shot){ shot.classList.toggle("full"); return; }
   const xb0=ev.target.closest("[data-dismiss]");
   if(xb0){ submitOne(xb0.dataset.dismiss,"dismissed",DEFAULT_TEXT.dismissed).then(render); return; }
   const a=ev.target.closest(".addbtn[data-id]"); if(a){openComposer(a.dataset.id);return;}
@@ -1630,7 +1766,7 @@ def serve(conv, author, port):
 def render(conv, author, served=False):
     lpath, cpath = conv / "ledger.md", conv / "comments.md"
     meta, claims = parse_ledger(lpath)
-    comments = parse_comments(cpath)
+    comments = inline_images(parse_comments(cpath), conv)
     disk_md = cpath.read_text() if cpath.exists() else ""
     # Render id = the ledger+comments state this page was built from. The page
     # drops any browser buffer stamped with a different one, which is what stops
