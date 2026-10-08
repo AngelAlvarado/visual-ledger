@@ -2,7 +2,7 @@
   "name": "visual-ledger",
   "displayName": "Visual Ledger",
   "description": "GitHub-style review comments on a Claude claim ledger, written back to comments.md",
-  "version": "0.17.0-anthropic",
+  "version": "0.18.0",
   "publisher": "local",
   "private": true,
   "license": "MIT",
@@ -101,15 +101,17 @@
           "enum": [
             "fake",
             "anthropic",
+            "custom",
             "off"
           ],
           "default": "fake",
           "enumDescriptions": [
             "Scripted placeholder text -- the microphone is NOT used",
-            "Anthropic's speech socket. UNVERIFIED and undocumented; needs a claude.ai token that expires in hours",
+            "Anthropic's speech socket. Undocumented; needs a claude.ai token that expires in hours",
+            "Your own module, named by dictation.backendModule",
             "No dictate button"
           ],
-          "description": "Which dictation backend the composer uses."
+          "description": "Which dictation backend the composer uses. All of them satisfy the same contract; the page cannot tell them apart."
         },
         "claudeLedger.dictation.tokenPath": {
           "type": "string",
@@ -120,6 +122,11 @@
           "type": "string",
           "default": "en",
           "description": "Language code passed to the speech backend."
+        },
+        "claudeLedger.dictation.backendModule": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to a JS module exporting start(channel, callbacks, opts) -> stop(). Used when backend is 'custom'."
         }
       }
     }

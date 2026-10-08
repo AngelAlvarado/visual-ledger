@@ -130,42 +130,49 @@ tells you where you are: grey idle, amber connecting, red pulsing listening.
 Interim words appear in grey under the box and only land in the textarea once
 a phrase finishes, so your sentence never rewrites itself under the cursor.
 
-**It is a fake right now.** The default backend emits scripted placeholder
-text and never touches the microphone — it exists so the interaction can be
-built and judged before the transcription question is settled. Turn the
-button off with `claudeLedger.dictation.backend: "off"`.
+**The default is a fake.** It emits scripted placeholder text and never
+touches the microphone, so the interaction is real while the transcription
+question stays open. `claudeLedger.dictation.backend: "off"` hides the button.
 
-A real backend implements one function in
-`scripts/vscode-extension/dictation.js`:
+#### The interface is the stable part
+
+Four backends ship or are supported, and the page cannot tell them apart:
+
+| `backend` | What it is |
+|---|---|
+| `fake` | scripted placeholder text (default) |
+| `anthropic` | the hosted socket. Undocumented; the token expires in hours |
+| `custom` | your own module, via `dictation.backendModule` |
+| `off` | no button |
+
+All of them satisfy one contract:
 
 ```js
-start(channel, { onText, onState, onError }) -> stop()
+start(channel, { onText, onState, onError }, opts) -> stop()
+
+onText(text, done, cumulative)
+   done=false      interim, may be revised
+   done=true       commit into the textarea
+   cumulative=true `text` is the WHOLE transcript so far, so the page
+                   replaces rather than appends
+onState("connecting" | "listening")
+onError(message)
 ```
 
-and gets registered in `pick()`. The panel does not change.
+A backend touches nothing else -- not the panel, not the page, not
+`dictation.js` if you use `custom`. The module is re-required per use, so
+editing one needs no reinstall.
 
-### Pasting a screenshot
+**Expect to need `cumulative: true`.** A streaming recogniser normally
+restates the whole utterance as it refines it rather than emitting each word
+once, and may send no per-phrase commit at all -- in which case commit on
+stop. That is measured behaviour from the hosted socket, not a guess.
+Appending cumulative text duplicates it quadratically; `test_page.js` has a
+case for exactly that.
 
-Paste an image into any composer and it is saved under the claim you are
-commenting on:
-
-    .claude/ledgers/<group>/<slug>/C8/ab12cd34ef56.png
-
-so the folder says what the screenshot is about without opening it. A batch
-reply belongs to several claims at once and falls back to a shared `images/`
-bucket. A markdown reference is dropped at the caret; it renders inline under
-the comment, and clicking it toggles full size.
-
-Named by content hash, so pasting the same image twice costs one file. Up to
-8MB per image. Images are gitignored along with `comments.md` -- they are
-part of your working comments, not of the committed claim list.
-
-They are inlined into `index.html` as data URIs rather than referenced by
-path, because the page has to work in the webview, in a `file://` tab and
-under `--serve`, and only one of those resolves a relative path to disk.
-Past 12MB of images on one page, further references stay as plain text.
-
-Pasting needs the VS Code panel; in a read-only context the image is dropped.
+A **local** recogniser is the obvious next backend: no token, nothing that
+expires, no undocumented endpoint to track. It needs no change to this
+extension -- write the module, point `backendModule` at it.
 
 ### Reading the panel
 

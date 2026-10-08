@@ -71,22 +71,58 @@ function fakeBackend(channel, cb) {
 
 /** Which backend to use. `claudeLedger.dictation.backend`:
  *    "fake"      scripted placeholder text (default)
- *    "anthropic" the real socket -- UNVERIFIED, undocumented, see that file
+ *    "anthropic" the hosted socket -- undocumented, token expires in hours
+ *    "custom"    a module of your own, named by dictation.backendModule
  *    "off"       no button
- *  Returns a function with the signature at the top of this file, already
- *  bound to whatever options its backend needs. */
+ *
+ *  The INTERFACE is the stable thing here, not any one backend. Everything
+ *  above satisfies the same five-line contract at the top of this file, and
+ *  the page cannot tell them apart. That is the point: a local recogniser,
+ *  a hosted socket and a scripted stub are interchangeable, and swapping one
+ *  for another touches nothing but this function.
+ *
+ *  "custom" exists so a new backend needs no change here at all -- point
+ *  dictation.backendModule at a module exporting start() and it is wired.
+ *
+ *  Whatever the backend, expect CUMULATIVE output: a streaming recogniser
+ *  normally restates the whole utterance as it refines it rather than
+ *  emitting each word once, and may send no per-phrase commit at all. Pass
+ *  cumulative=true and the page replaces instead of appending; appending
+ *  cumulative text duplicates it quadratically, which test_page.js checks.
+ */
 function pick(vscode) {
   const cfg = vscode.workspace.getConfiguration("claudeLedger");
   const mode = cfg.get("dictation.backend") || "fake";
+  const language = cfg.get("dictation.language") || "en";
   if (mode === "off") return null;
+
   if (mode === "anthropic") {
     const { anthropicBackend } = require("./dictation-anthropic");
-    const opts = {
-      tokenPath: cfg.get("dictation.tokenPath") || "",
-      language: cfg.get("dictation.language") || "en",
-    };
+    const opts = { tokenPath: cfg.get("dictation.tokenPath") || "", language };
     return (channel, cb) => anthropicBackend(channel, cb, opts);
   }
+
+  if (mode === "custom") {
+    const mod = cfg.get("dictation.backendModule");
+    if (!mod) return () => { throw new Error(
+      "Set claudeLedger.dictation.backendModule to a module exporting start()."); };
+    // Required lazily and uncached, so editing a backend needs a reload of
+    // the module and nothing else -- no reinstall, and a broken module
+    // cannot stop the panel loading.
+    return (channel, cb) => {
+      let start;
+      try {
+        delete require.cache[require.resolve(mod)];
+        const m = require(mod);
+        start = m.start || m.default || m;
+      } catch (e) {
+        throw new Error(`Cannot load ${mod}: ${e.message}`);
+      }
+      if (typeof start !== "function") throw new Error(`${mod} exports no start().`);
+      return start(channel, cb, { language });
+    };
+  }
+
   return fakeBackend;
 }
 
