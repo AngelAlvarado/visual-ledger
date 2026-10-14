@@ -267,11 +267,26 @@ function wirePanel(context, panel, conv, panels) {
     return parts.join("|");
   };
   let painted = null;
+  // Set by the page whenever a composer holds unsaved text. Repainting
+  // replaces webview.html, which destroys the DOM -- Angel lost a comment
+  // mid-sentence to exactly this, with the focus and the scroll position
+  // going with it. So a repaint waits for the composer to close. `force`
+  // (the explicit Reload command) still goes through.
+  let busy = false;
+  let missed = false;
 
   const paint = (force) => {
     const conv = panel.current;
     const sig = conv + "||" + signature(conv);
     if (!force && sig === painted) return;
+    if (!force && busy) {
+      // Remember that something changed, and show it the moment the
+      // composer closes. Dropping it silently would leave a stale panel
+      // with no sign of it, so the page is told to flag Refresh.
+      missed = true;
+      try { panel.webview.postMessage({ type: "stale", stale: true }); } catch (e) {}
+      return;
+    }
     painted = sig;
     try { execFileSync("python3", [RENDER(), conv], { encoding: "utf8" }); }
     catch (err) {
@@ -290,11 +305,25 @@ function wirePanel(context, panel, conv, panels) {
 
   panel.webview.onDidReceiveMessage((msg) => {
     if (dict.handle(msg)) return;
+    if (msg && msg.type === "reload") {
+      // Explicit: the user asked. Their draft is already mirrored into the
+      // webview store, so the repaint cannot cost them anything.
+      busy = false; missed = false;
+      paint(true);
+      return;
+    }
+    if (msg && msg.type === "busy") {
+      busy = !!msg.busy;
+      if (!busy && missed) { missed = false; paint(false); }
+      return;
+    }
     if (msg && msg.type === "switch" && msg.dir) {
       panel.current = msg.dir;
       panel.title = `Ledger: ${path.basename(msg.dir)}`;
       paint();
     } else if (msg && msg.type === "comment" && msg.comment) {
+      // Submitting is the end of the edit, whatever the page said last.
+      busy = false;
       appendComment(path.join(panel.current, "comments.md"), msg.comment);
       painted = panel.current + "||" + signature(panel.current);
       vscode.workspace.textDocuments

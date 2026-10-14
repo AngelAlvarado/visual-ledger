@@ -768,6 +768,11 @@ button.mic[disabled]{opacity:.35;cursor:default}
 .micerr{color:var(--crit);font-size:12px;padding:5px 2px 0}
 /* Artifact chip. Neutral while the claim is open, green once the file has
    moved, red when it has not -- the one state that is a to-do. */
+/* Refresh. Quiet until the panel is actually behind -- a button that always
+   looks urgent stops meaning anything. */
+.chip.refresh{display:inline-flex;align-items:center;gap:5px}
+.chip.refresh.stale{color:var(--warn);border-color:var(--warn);font-weight:600}
+.chip.refresh.stale svg{animation:micblink 1.4s infinite}
 .tag.art{border-style:dashed}
 .tag.art.ok{color:var(--ok);border-color:var(--ok)}
 .tag.art.drift{color:var(--crit);border-color:var(--crit);font-weight:600}
@@ -851,7 +856,18 @@ const savePending=()=>{try{localStorage.setItem(PKEY,JSON.stringify(pending));}c
 const SERVED = location.protocol==="http:" || location.protocol==="https:";
 let VSC=null;
 try{ if(typeof acquireVsCodeApi!=="undefined") VSC=acquireVsCodeApi(); }catch(err){ VSC=null; }
-if(VSC) try{ VSC.setState({conv:__CONVDIR__}); }catch(err){}
+/* The webview store is shared: `conv` identifies the conversation for the
+   extension, and saveUI() keeps the view state beside it. Each writes its
+   own keys and preserves the other's -- an early version of saveUI replaced
+   the whole object and silently dropped `conv`. */
+function uiState(patch){
+  if(!VSC) return {};
+  let cur={}; try{ cur=VSC.getState()||{}; }catch(err){ cur={}; }
+  if(!patch) return cur;
+  try{ VSC.setState(Object.assign({},cur,patch)); }catch(err){}
+  return cur;
+}
+if(VSC) uiState({conv:__CONVDIR__});
 const MODE = VSC ? "vscode" : (SERVED ? "served" : "readonly");
 
 async function post(c){
@@ -881,6 +897,69 @@ const all=()=>DISK.concat(pending.map(p=>({...p,pending:true})));
 let tagFilter=null;
 let filter=null, onlyUncommented=false, onlyClaude=false,
     onlyMine=CLAIMS.some(c=>TURNS[c.id]==="you");
+
+/* ---- surviving a repaint -------------------------------------------
+   Claude edits ledger.md while you are looking at the panel, and the
+   extension answers by replacing webview.html wholesale. That destroys the
+   DOM: a half-typed comment, the caret, the scroll position, which filter
+   was on and which card you were reading all vanish, and cards can move to
+   the Archive underneath you.
+
+   Two defences. This is the backstop -- view state is mirrored into the
+   webview's own store, which DOES survive an html replacement, and restored
+   on load. The other is in the extension, which holds repaints back
+   entirely while a composer has text in it, so the common case never gets
+   this far. */
+function saveUI(){
+  if(!VSC) return;
+  const c=document.querySelector(".compose");
+  const ta=c&&c.querySelector("textarea");
+  const card=c&&c.closest(".claim");
+  uiState({
+    scroll:window.scrollY||document.documentElement.scrollTop||0,
+    filter,tagFilter,onlyUncommented,onlyClaude,onlyMine,
+    draft: ta ? {id: card?card.id.replace("claim-",""):"__batch__",
+                 text: ta.value, caret: ta.selectionStart} : null,
+  });
+}
+
+function restoreUI(){
+  if(!VSC) return;
+  const st=uiState();
+  if(!st || (st.draft===undefined && st.filter===undefined)) return;
+  filter=st.filter??null; tagFilter=st.tagFilter??null;
+  onlyUncommented=!!st.onlyUncommented; onlyClaude=!!st.onlyClaude;
+  onlyMine=!!st.onlyMine;
+  document.querySelectorAll(".chip[data-kind]").forEach(o=>
+    o.setAttribute("aria-pressed",String(o.dataset.kind===filter)));
+  [["unc",onlyUncommented],["mine",onlyMine],["tcl",onlyClaude]].forEach(([id,on])=>{
+    const el=document.getElementById(id);
+    if(el) el.setAttribute("aria-pressed",String(on));
+  });
+  render();
+  /* Put the draft back only if its claim still exists -- Claude may have
+     removed it, and restoring onto the wrong card would misfile the
+     comment silently. */
+  if(st.draft){
+    const d=st.draft;
+    if(d.id==="__batch__") openBatch();
+    else if(document.getElementById("claim-"+d.id)) openComposer(d.id);
+    const ta=document.querySelector(".compose textarea");
+    if(ta){
+      ta.value=d.text||"";
+      const at=Math.min(d.caret??ta.value.length, ta.value.length);
+      ta.selectionStart=ta.selectionEnd=at; ta.focus();
+      setBusy(!!ta.value);
+    }
+  }
+  if(st.scroll) window.scrollTo(0,st.scroll);
+}
+
+/* Ask the extension to hold repaints while there is unsaved text. */
+function setBusy(on){
+  if(!VSC) return;
+  try{ VSC.postMessage({type:"busy",busy:!!on}); }catch(err){}
+}
 
 const MAIN=document.getElementById("cardlist");
 const ARC=document.getElementById("arcbody");
@@ -1011,11 +1090,14 @@ function openComposer(id){
   el.appendChild(c);
   const ta=c.querySelector("textarea"); ta.focus();
   attachDictation(c,ta); attachPaste(c,ta,id);
+  // Unsaved text is the thing a repaint destroys, so it is what holds
+  // repaints off -- and it is mirrored every keystroke as a backstop.
+  ta.addEventListener("input",()=>{ setBusy(!!ta.value); saveUI(); });
   const submit=async st=>{
     const text=ta.value.trim();
     if(!text && st!=="ok" && st!=="dismissed" && st!=="parked"){ta.focus();return;}
     stopDictation(c);
-    c.remove();
+    c.remove(); setBusy(false); saveUI();
     await submitOne(id,st,text||DEFAULT_TEXT[st]||"Confirmed.");
     render();
   };
@@ -1026,7 +1108,7 @@ function openComposer(id){
     if(b.dataset.mic) return;
     b.onclick=()=>{
     const s=b.dataset.s;
-    if(s==="cancel"){stopDictation(c);c.remove();return;} submit(s);};});
+    if(s==="cancel"){stopDictation(c);c.remove();setBusy(false);saveUI();return;} submit(s);};});
   ta.onkeydown=ev=>{if((ev.metaKey||ev.ctrlKey)&&ev.key==="Enter")submit("note");
                     if(ev.key==="Escape")c.remove();};
 }
@@ -1239,17 +1321,18 @@ function openBatch(){
   box.appendChild(d);
   const ta=d.querySelector("textarea"); ta.focus();
   attachDictation(d,ta); attachPaste(d,ta,null);   // batch: shared bucket
+  ta.addEventListener("input",()=>{ setBusy(!!ta.value); saveUI(); });
   d.querySelectorAll("button").forEach(b=>{
     if(b.dataset.mic) return;            // see openComposer: never clobber it
     b.onclick=async()=>{
     const st=b.dataset.s;
-    if(st==="cancel"){stopDictation(d);box.innerHTML="";return;}
+    if(st==="cancel"){stopDictation(d);box.innerHTML="";setBusy(false);saveUI();return;}
     const text=ta.value.trim();
     if(!text && st==="note"){ta.focus();return;}
     for(const id of ids){
       await submitOne(id,st,text||DEFAULT_TEXT[st]||"Noted.");
     }
-    box.innerHTML=""; render();
+    box.innerHTML=""; setBusy(false); saveUI(); render();
   };});
 }
 
@@ -1307,7 +1390,24 @@ document.querySelectorAll(".chip[data-kind]").forEach(ch=>ch.onclick=()=>{
   if(filter){onlyMine=false;document.getElementById("mine").setAttribute("aria-pressed","false");}
   document.querySelectorAll(".chip[data-kind]").forEach(o=>
     o.setAttribute("aria-pressed",String(o.dataset.kind===filter)));
-  render();});
+  render(); saveUI();});
+/* Repaints are held back while a composer has text (the extension does the
+   holding), so the panel can legitimately be behind. This says so, and is
+   the way back regardless -- a manual re-read that never loses a draft,
+   because saveUI has already mirrored it. */
+document.getElementById("refresh").onclick=function(){
+  saveUI();
+  if(VSC) VSC.postMessage({type:"reload"});
+  this.classList.remove("stale");
+  document.getElementById("rtxt").textContent="Refresh";
+};
+window.addEventListener("message",ev=>{
+  const m=ev.data||{};
+  if(m.type!=="stale") return;
+  const b=document.getElementById("refresh"); if(!b) return;
+  b.classList.toggle("stale",!!m.stale);
+  document.getElementById("rtxt").textContent=m.stale?"Updated - refresh":"Refresh";
+});
 document.getElementById("unc").onclick=function(){
   onlyUncommented=!onlyUncommented; this.setAttribute("aria-pressed",String(onlyUncommented)); render();};
 document.getElementById("mine").onclick=function(){
@@ -1378,6 +1478,14 @@ document.getElementById("copy").onclick=async function(){
   this.textContent="Copied - paste into chat"; setTimeout(()=>this.textContent="Copy new comments",2200);};
 
 render();
+/* Restore whatever the last repaint destroyed. After render(), so the cards
+   exist to scroll to and to reopen a composer on. */
+restoreUI();
+/* Scroll is cheap to lose and annoying to lose; mirror it lazily. */
+let scrollSave=null;
+window.addEventListener("scroll",()=>{
+  clearTimeout(scrollSave); scrollSave=setTimeout(saveUI,250);
+});
 """
 
 
@@ -1640,6 +1748,12 @@ def build(meta, claims, comments, slug, disk_md, author, render_id, convs=None,
     <i></i>Back with Claude<b>{n_cl}</b></button>
   <button class="chip" id="vturns" aria-pressed="false">Conversation<b>{len(turns_list or [])}</b></button>
   <span class="spacer"></span>
+  <button class="chip refresh" id="refresh" type="button"
+    title="Re-read the ledger from disk">
+    <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"
+      fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>
+    </svg><span id="rtxt">Refresh</span></button>
   <span class="sync"><span class="dot" id="dot"></span><span id="stxt">&#8203;</span></span>
   <button class="btn" id="copy" disabled>Copy new comments</button>
 </div></div>

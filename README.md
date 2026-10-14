@@ -182,6 +182,26 @@ extension -- write the module, point `backendModule` at it.
 - **Archive** (bottom) — collapsed. Dismissed and parked claims move here.
   Commenting on one brings it back; nothing is deleted.
 - **Send bar** (bottom) — appears when something is on Claude's side.
+- **Refresh** (top right) — re-reads the ledger from disk. It turns amber and
+  says *Updated — refresh* when Claude changed something while you were
+  mid-comment.
+
+### Your typing is never lost to a repaint
+
+Claude edits `ledger.md` while you are looking at the panel, and the panel
+answers by replacing its whole HTML — which destroys the DOM, and with it a
+half-typed comment, the caret, the scroll position and your filters.
+
+Two defences, both automatic:
+
+- While a composer holds unsaved text, **repaints are held back**. The
+  Refresh button goes amber so you know the panel is behind.
+- Every keystroke mirrors the draft into the webview's own store, which
+  *does* survive an HTML replacement. A repaint that happens anyway restores
+  the draft, caret, scroll and filters.
+
+A draft is only restored if its claim still exists — Claude may have removed
+it, and restoring onto the wrong card would misfile the comment silently.
 
 Opened any other way (a preview tab, a `file://` page) the panel is **read-only**
 and says so.

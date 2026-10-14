@@ -128,6 +128,12 @@ function main() {
 
   const { doc, byId, all, listeners } = makeDom(html);
   const store = {};
+  const posted = [];
+  // Seeded deliberately: a draft pointing at a claim that no longer exists
+  // is the dangerous case -- restoring it onto the wrong card would misfile
+  // the comment, and an unguarded lookup would throw on load.
+  let vsState = { scroll: 40, filter: "decision", onlyMine: false,
+                  draft: { id: "C9999", text: "half a sentence", caret: 4 } };
   const sandbox = {
     document: doc,
     // The page listens on `window` for the extension's dictation frames, so
@@ -135,6 +141,10 @@ function main() {
     // that only exists would let a broken handler pass unnoticed.
     window: {
       showDirectoryPicker: undefined,
+      // restoreUI() scrolls back to where you were, so the shim needs these
+      // or the page throws on load for every viewer.
+      scrollY: 0,
+      scrollTo(x, y) { this.scrollY = y || 0; },
       _msg: [],
       addEventListener(type, fn) { if (type === "message") this._msg.push(fn); },
       removeEventListener(type, fn) {
@@ -150,7 +160,15 @@ function main() {
       setItem: (k, v) => { store[k] = v; },
       removeItem: (k) => { delete store[k]; },
     },
-    acquireVsCodeApi: () => ({ postMessage() {}, setState() {} }),
+    // A real store, not a stub: the page now mirrors its view state here to
+    // survive the extension replacing webview.html, and restoreUI() runs on
+    // every load. A throw in there bricks the panel, so the harness seeds a
+    // state and checks the page still comes up.
+    acquireVsCodeApi: () => ({
+      postMessage(m) { posted.push(m); },
+      setState(v) { vsState = v; },
+      getState() { return vsState; },
+    }),
     // The page's own functions are local to the new Function() scope below,
     // so anything worth testing directly has to be handed out deliberately.
     __export: {},
@@ -160,7 +178,8 @@ function main() {
 
   const fail = [];
   try {
-    const epilogue = ";try{__export.commitSpeech=commitSpeech;__export.DICT=DICT;}"
+    const epilogue = ";try{__export.commitSpeech=commitSpeech;__export.DICT=DICT;"
+                   + "__export.saveUI=saveUI;__export.restoreUI=restoreUI;}"
                    + "catch(e){/* page without dictation */}";
     new Function(...Object.keys(sandbox), script + epilogue)(...Object.values(sandbox));
   } catch (e) {
@@ -256,6 +275,13 @@ function main() {
     fail.push(`dictation frame threw: ${e.message}`);
   }
   if (!sandbox.window._msg.length) fail.push("page registered no message listener");
+
+  // The seeded draft names a claim that is not on the page, so nothing
+  // should have been reopened -- and nothing should have thrown.
+  if (typeof sandbox.__export.saveUI === "function") {
+    try { sandbox.__export.saveUI(); }
+    catch (e) { fail.push(`saveUI threw: ${e.message}`); }
+  }
 
   if (fail.length) {
     console.error("FAIL");
