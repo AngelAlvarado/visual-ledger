@@ -68,11 +68,19 @@ volume is recreated**.
 > first — both register the same command IDs and two copies collide:
 > `code --uninstall-extension local.claude-ledger`
 
-If the panel cannot find `ledger.py` it now asks, with a **Locate
-ledger.py...** button that remembers your answer, and there is a
-**Ledger: locate ledger.py** command. It no longer guesses a path -- a guess
-surfaced as a python `No such file` naming a file inside your own project,
-which reads like the repo is broken rather than like the script is elsewhere.
+`install-extension.sh` bakes the absolute path of this clone's `ledger.py`
+into the extension it builds, so the panel knows where the renderer is with
+no configuration at all. The path goes only into the installed copy, never
+back into the repo -- it is your machine's path, and committing it would
+hand everyone else a wrong one. It is a *default*, so an explicit
+`claudeLedger.scriptPath` still wins, and the extension checks the file
+exists before using it: move the clone and it falls back to searching.
+
+If it still cannot find `ledger.py` it asks, with a **Locate ledger.py...**
+button that remembers your answer, plus a **Ledger: locate ledger.py**
+command. It never guesses -- a guess surfaced as a python `No such file`
+naming a file inside your own project, which reads like the repo is broken
+rather than like the script is elsewhere.
 
 If the panel cannot find `ledger.py` (likely when the plugin lives in
 `~/.claude/plugins/` and the extension is looking in your workspace), set

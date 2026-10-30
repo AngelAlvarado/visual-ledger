@@ -24,6 +24,24 @@ import json, pathlib, sys, zipfile
 src, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 p = json.loads((src / "package.json").read_text())
 name, pub, ver = p["name"], p["publisher"], p["version"]
+
+# The panel is a separate .vsix and has no way to know where this repo was
+# cloned, so it used to hunt for ledger.py and, failing, ask. But THIS script
+# is being run FROM the repo -- the path is right here. Bake it in as the
+# setting's default, and the install is self-configuring.
+#
+# Only into the packaged copy, never back into the working tree: the path is
+# this machine's, and committing it would hand everyone else a wrong one.
+# It is a default, so an explicit user setting still wins, and the extension
+# checks the file exists before using it -- a moved clone falls back to the
+# search rather than breaking.
+script = (src.parent / "ledger.py").resolve()
+if script.exists():
+    props = p.setdefault("contributes", {}).setdefault("configuration", {}) \
+             .setdefault("properties", {})
+    prop = props.setdefault("claudeLedger.scriptPath", {"type": "string"})
+    prop["default"] = str(script)
+    print(f"  baked scriptPath default: {script}", file=sys.stderr)
 manifest = f'''<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
   <Metadata>
@@ -58,7 +76,10 @@ with zipfile.ZipFile(vsix, "w", zipfile.ZIP_DEFLATED) as z:
     # from the .vsix and fail at require() time, in the user's editor.
     files = ["package.json"] + sorted(f.name for f in src.glob("*.js"))
     for f in files:
-        z.write(src / f, f"extension/{f}")
+        if f == "package.json":
+            z.writestr("extension/package.json", json.dumps(p, indent=2))
+        else:
+            z.write(src / f, f"extension/{f}")
 print(vsix)
 PY
 )"
