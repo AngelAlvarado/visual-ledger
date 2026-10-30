@@ -71,6 +71,7 @@ function fakeBackend(channel, cb) {
 
 /** Which backend to use. `claudeLedger.dictation.backend`:
  *    "fake"      scripted placeholder text (default)
+ *    "local"     faster-whisper on this machine -- no token, nothing expires
  *    "anthropic" the hosted socket -- undocumented, token expires in hours
  *    "custom"    a module of your own, named by dictation.backendModule
  *    "off"       no button
@@ -90,11 +91,30 @@ function fakeBackend(channel, cb) {
  *  cumulative=true and the page replaces instead of appending; appending
  *  cumulative text duplicates it quadratically, which test_page.js checks.
  */
+/** stt_local.py ships beside ledger.py, so whatever found one finds both. */
+function pickScriptPath(vscode) {
+  const cfg = vscode.workspace.getConfiguration("claudeLedger").get("scriptPath");
+  return cfg || "";
+}
+
 function pick(vscode) {
   const cfg = vscode.workspace.getConfiguration("claudeLedger");
   const mode = cfg.get("dictation.backend") || "fake";
   const language = cfg.get("dictation.language") || "en";
   if (mode === "off") return null;
+
+  if (mode === "local") {
+    const { localBackend } = require("./dictation-local");
+    const opts = {
+      scriptPath: pickScriptPath(vscode),
+      python: cfg.get("dictation.python") || "python3",
+      model: cfg.get("dictation.model") || "small.en",
+      device: cfg.get("dictation.device") || "cpu",
+      computeType: cfg.get("dictation.computeType") || "int8",
+      language,
+    };
+    return (channel, cb) => localBackend(channel, cb, opts);
+  }
 
   if (mode === "anthropic") {
     const { anthropicBackend } = require("./dictation-anthropic");

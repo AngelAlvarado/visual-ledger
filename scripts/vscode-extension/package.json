@@ -2,7 +2,7 @@
   "name": "visual-ledger",
   "displayName": "Visual Ledger",
   "description": "GitHub-style review comments on a Claude claim ledger, written back to comments.md",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "publisher": "local",
   "private": true,
   "license": "MIT",
@@ -113,6 +113,7 @@
           "type": "string",
           "enum": [
             "fake",
+            "local",
             "anthropic",
             "custom",
             "off"
@@ -120,11 +121,12 @@
           "default": "fake",
           "enumDescriptions": [
             "Scripted placeholder text -- the microphone is NOT used",
+            "faster-whisper on this machine. No token, nothing expires, works offline. Needs: pip install faster-whisper, plus sox",
             "Anthropic's speech socket. Undocumented; needs a claude.ai token that expires in hours",
             "Your own module, named by dictation.backendModule",
             "No dictate button"
           ],
-          "description": "Which dictation backend the composer uses. All of them satisfy the same contract; the page cannot tell them apart."
+          "description": "Which dictation backend the composer uses. All satisfy the same contract; the page cannot tell them apart."
         },
         "claudeLedger.dictation.tokenPath": {
           "type": "string",
@@ -140,6 +142,30 @@
           "type": "string",
           "default": "",
           "description": "Absolute path to a JS module exporting start(channel, callbacks, opts) -> stop(). Used when backend is 'custom'."
+        },
+        "claudeLedger.dictation.python": {
+          "type": "string",
+          "default": "python3",
+          "description": "Python used for local transcription. Must have faster-whisper installed."
+        },
+        "claudeLedger.dictation.model": {
+          "type": "string",
+          "default": "small.en",
+          "description": "faster-whisper model, or a local path. tiny.en / base.en / small.en / distil-small.en trade accuracy for speed."
+        },
+        "claudeLedger.dictation.device": {
+          "type": "string",
+          "enum": [
+            "cpu",
+            "cuda"
+          ],
+          "default": "cpu",
+          "description": "Where the local model runs."
+        },
+        "claudeLedger.dictation.computeType": {
+          "type": "string",
+          "default": "int8",
+          "description": "int8 on CPU, float16 on a GPU."
         }
       }
     }
