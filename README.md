@@ -177,13 +177,67 @@ a phrase finishes, so your sentence never rewrites itself under the cursor.
 touches the microphone, so the interaction is real while the transcription
 question stays open. `claudeLedger.dictation.backend: "off"` hides the button.
 
+#### Local dictation (faster-whisper)
+
+Runs on your machine. No token, nothing that expires, no undocumented
+endpoint, works offline.
+
+```bash
+pip install faster-whisper numpy    # the model library
+sudo apt install sox                # the `rec` recorder (brew install sox on macOS)
+```
+
+Then, in VS Code settings:
+
+```json
+"claudeLedger.dictation.backend": "local"
+```
+
+That is all it needs. The first dictation downloads the model (~75 MB for
+`small.en`) and is slow to start; after that it is local and quiet.
+
+| Setting | Default | Notes |
+|---|---|---|
+| `dictation.model` | `small.en` | `tiny.en`, `base.en`, `distil-small.en`, or a local path |
+| `dictation.device` | `cpu` | `cuda` if you have one |
+| `dictation.computeType` | `int8` | `float16` on a GPU |
+| `dictation.python` | `python3` | a venv's python, if that is where faster-whisper lives |
+
+**It corrects itself as you talk** -- the helper re-decodes the whole
+utterance each interval rather than appending slices, so a word misheard in
+isolation is fixed once the sentence around it exists. That is why its
+output is cumulative.
+
+Known limit: past 30 seconds the oldest audio is frozen out of the rolling
+buffer. The cut can land mid-word; a seam de-duplicator catches the usual
+double-word, but one long unbroken monologue is the weak case.
+
+#### Anthropic's hosted socket
+
+Works, but it is not the default and should not be a daily driver:
+
+```json
+"claudeLedger.dictation.backend": "anthropic",
+"claudeLedger.dictation.tokenPath": "/absolute/path/to/a/file/holding/a/token"
+```
+
+The token is a **live claude.ai session credential**, not a scoped API key,
+and it **expires in hours** -- there is no refresh flow, so the mic simply
+stops and the panel reports a closed socket. The endpoint is undocumented,
+so it can change without notice, and a third-party client using it may not
+sit within Anthropic's terms. A *path* is used rather than the secret itself,
+so the token never lands in a settings file that might sync.
+
+Useful for comparison, or where the local model is too slow.
+
 #### The interface is the stable part
 
-Four backends ship or are supported, and the page cannot tell them apart:
+Five backends, and the page cannot tell them apart:
 
 | `backend` | What it is |
 |---|---|
 | `fake` | scripted placeholder text (default) |
+| `local` | **faster-whisper on this machine** -- no token, nothing expires |
 | `anthropic` | the hosted socket. Undocumented; the token expires in hours |
 | `custom` | your own module, via `dictation.backendModule` |
 | `off` | no button |
@@ -450,7 +504,9 @@ count.
 | `scripts/ledger.py` | renderer and CLI. Python stdlib only |
 | `scripts/test_page.js` | runs the page's JS in a shim DOM after every render |
 | `scripts/vscode-extension/` | the panel |
-| `scripts/vscode-extension/dictation.js` | dictation backends (fake by default) |
+| `scripts/vscode-extension/dictation.js` | backend selection + the custom seam |
+| `scripts/vscode-extension/dictation-local.js` | local faster-whisper backend |
+| `scripts/stt_local.py` | the local model host: PCM in, JSON transcripts out |
 | `scripts/install-extension.sh` | builds a `.vsix` and installs it |
 | `scripts/patch-claude-extension.py` | optional, **run by hand** |
 | `scripts/sync_conversations.py` | list sessions |
