@@ -212,6 +212,15 @@ installed. The first dictation downloads the model (~75 MB for
 | `dictation.computeType` | `int8` | `float16` on a GPU |
 | `dictation.python` | `python3` | a venv's python, if that is where faster-whisper lives |
 
+**It tells you which words were least clear.** After each dictation the
+composer shows the handful of words the recogniser scored lowest, with the
+percentage: *Least clear: particular 54% · successful 61%*. It is not a
+score and not a coach -- just where what you said and what English expects
+diverged most, on speech you were producing anyway. It clears the moment you
+type. Tune the threshold with `--unclear-below` (default 0.65), and note
+that words frozen out of the rolling window carry no confidence, since it
+comes from the final pass.
+
 **It corrects itself as you talk** -- the helper re-decodes the whole
 utterance each interval rather than appending slices, so a word misheard in
 isolation is fixed once the sentence around it exists. That is why its

@@ -2,7 +2,7 @@
   "name": "visual-ledger",
   "displayName": "Visual Ledger",
   "description": "GitHub-style review comments on a Claude claim ledger, written back to comments.md",
-  "version": "0.26.0",
+  "version": "0.27.0",
   "publisher": "local",
   "private": true,
   "license": "MIT",

@@ -6,7 +6,7 @@
  *
  *      start(channel, { onText, onState, onError }) -> stop()
  *
- *      onText(text, done, cumulative)
+ *      onText(text, done, cumulative, meta)
  *                           done=false is interim and may be revised;
  *                           done=true commits into the textarea.
  *                           cumulative=true means `text` is the whole
@@ -14,6 +14,8 @@
  *                           has instead of appending -- the real backend
  *                           restates everything in every frame, and
  *                           appending that duplicates it exponentially.
+ *                   meta.unclear  optional [{word, p}] the backend was least
+ *                           sure of, shown back as pronunciation feedback.
  *      onState("connecting" | "listening")
  *      onError(message)
  *
@@ -178,9 +180,10 @@ function attach(vscode, panel) {
     }
     try {
       const stop = backend(channel, {
-        onText: (text, done, cumulative) => { if (active && active.channel === channel)
+        onText: (text, done, cumulative, meta) => { if (active && active.channel === channel)
                                     post({ type: "dictate:text", channel, text, done,
-                                           cumulative: !!cumulative }); },
+                                           cumulative: !!cumulative,
+                                           unclear: (meta && meta.unclear) || [] }); },
         onState: (state) => { if (active && active.channel === channel)
                                 post({ type: "dictate:state", channel, state }); },
         onError: (error) => { if (active && active.channel === channel) {

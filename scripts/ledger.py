@@ -765,6 +765,7 @@ button.mic[disabled]{opacity:.35;cursor:default}
    reads as provisional until an endpoint frame commits it into the textarea. */
 .compose textarea.dictating{border-color:var(--accent)}
 .interim{color:var(--faint);font-style:italic;padding:5px 2px 0;font-size:12px;min-height:1em}
+.unclear{color:var(--warn);font-size:11.5px;padding:5px 2px 0;font-variant-numeric:tabular-nums}
 .micerr{color:var(--crit);font-size:12px;padding:5px 2px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 /* Artifact chip. Neutral while the claim is open, green once the file has
    moved, red when it has not -- the one state that is a to-do. */
@@ -967,6 +968,21 @@ function restoreUI(){
   if(st.scroll) window.scrollTo(0,st.scroll);
 }
 
+/* Which words the recogniser was least sure of. Not a score and not a
+   coach -- just the words where what you said and what English expects
+   diverged most, on speech you were producing anyway. Cheap, honest, and it
+   disappears the moment you type. */
+function showUnclear(box,list){
+  if(!box) return;
+  let el=box.querySelector(".unclear");
+  if(!list || !list.length){ if(el) el.remove(); return; }
+  if(!el){ el=document.createElement("div"); el.className="unclear"; box.appendChild(el); }
+  el.textContent="Least clear: "+list
+    .map(w=>`${w.word} ${Math.round(w.p*100)}%`).join(" \u00b7 ");
+  el.title="How confident the recogniser was. Low usually means the audio was "
+         +"poor, the word is unusual, or the sound did not land as English expects.";
+}
+
 /* Ask the extension to hold repaints while there is unsaved text. */
 function setBusy(on){
   if(!VSC) return;
@@ -1123,7 +1139,8 @@ function openComposer(id){
   attachDictation(c,ta); attachPaste(c,ta,id);
   // Unsaved text is the thing a repaint destroys, so it is what holds
   // repaints off -- and it is mirrored every keystroke as a backstop.
-  ta.addEventListener("input",()=>{ setBusy(!!ta.value); saveUI(); });
+  ta.addEventListener("input",()=>{ setBusy(!!ta.value); saveUI();
+    const u=c.querySelector(".unclear"); if(u) u.remove(); });
   const submit=async st=>{
     const text=ta.value.trim();
     if(!text && st!=="ok" && st!=="dismissed" && st!=="parked"){ta.focus();return;}
@@ -1339,7 +1356,11 @@ window.addEventListener("message",ev=>{
   if(m.type==="dictate:text"){
     if(DICT.box) micState(DICT.box,"listening");
     const iv=DICT.box && DICT.box.querySelector(".interim");
-    if(m.done){ commitSpeech(m.text,m.cumulative); if(iv){iv.hidden=true;iv.textContent="";} }
+    if(m.done){
+      commitSpeech(m.text,m.cumulative);
+      if(iv){iv.hidden=true;iv.textContent="";}
+      showUnclear(DICT.box, m.unclear);
+    }
     else if(iv){ iv.hidden=false; iv.textContent=m.text; }
   }
 });
@@ -1363,7 +1384,8 @@ function openBatch(){
   box.appendChild(d);
   const ta=d.querySelector("textarea"); ta.focus();
   attachDictation(d,ta); attachPaste(d,ta,null);   // batch: shared bucket
-  ta.addEventListener("input",()=>{ setBusy(!!ta.value); saveUI(); });
+  ta.addEventListener("input",()=>{ setBusy(!!ta.value); saveUI();
+    const u=d.querySelector(".unclear"); if(u) u.remove(); });
   d.querySelectorAll("button").forEach(b=>{
     if(b.dataset.mic) return;            // see openComposer: never clobber it
     b.onclick=async()=>{

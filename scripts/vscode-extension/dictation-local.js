@@ -98,7 +98,9 @@ function localBackend(channel, cb, opts) {
         last = m.text;
         cb.onText(m.text, false, true);
       } else if (m.type === "final") {
-        if (m.text) { last = m.text; cb.onText(m.text, true, true); }
+        // The final pass also reports which words the model was least sure
+        // of -- free feedback on speech you were producing anyway.
+        if (m.text) { last = m.text; cb.onText(m.text, true, true, { unclear: m.unclear || [] }); }
       } else if (m.type === "error") {
         fail(m.message || "Local transcription failed.");
       }

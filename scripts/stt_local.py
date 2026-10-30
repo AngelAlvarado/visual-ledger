@@ -106,16 +106,38 @@ def join(prefix, tail):
     return " ".join(a + b).strip()
 
 
-def transcribe(model, audio, args):
-    """The whole buffer, as one string."""
+def transcribe(model, audio, args, want_words=False):
+    """The whole buffer as one string, and optionally per-word confidence.
+
+    `word_timestamps` makes the model report a probability per word. A low
+    one means the decoder was unsure -- usually poor audio, an unusual name,
+    or a sound that did not land the way English expects. That is a free
+    intelligibility signal on speech you were producing anyway, so it is
+    collected on the final pass and shown back rather than thrown away.
+
+    Only on the final pass: it costs alignment work, and interim words churn
+    too fast to be worth reading.
+    """
     segments, _ = model.transcribe(
         audio,
         language=None if args.language == "auto" else args.language,
         beam_size=args.beam_size,
         vad_filter=True,                 # skip silence rather than invent words
         condition_on_previous_text=False,  # stops one bad guess poisoning the rest
+        word_timestamps=want_words,
     )
-    return " ".join(s.text.strip() for s in segments).strip()
+    segments = list(segments)
+    text = " ".join(s.text.strip() for s in segments).strip()
+    if not want_words:
+        return text, []
+    words = []
+    for seg in segments:
+        for w in (getattr(seg, "words", None) or []):
+            token = (getattr(w, "word", "") or "").strip()
+            prob = getattr(w, "probability", None)
+            if token and prob is not None:
+                words.append({"word": token, "p": round(float(prob), 3)})
+    return text, words
 
 
 def main():
@@ -132,6 +154,8 @@ def main():
                     help="seconds of new audio between re-decodes")
     ap.add_argument("--window", type=float, default=30.0,
                     help="seconds of audio kept in the rolling buffer")
+    ap.add_argument("--unclear-below", type=float, default=0.65,
+                    help="report words the model scored below this")
     ap.add_argument("--selftest", action="store_true",
                     help="load the model and exit, without reading audio")
     args = ap.parse_args()
@@ -169,8 +193,9 @@ def main():
     cap = int(args.window * SAMPLE_RATE * BYTES_PER_SAMPLE)
     seen = 0
     last = ""
+    last_words = []     # per-word confidence from the final pass
 
-    def current_text():
+    def current_text(want_words=False):
         nonlocal committed
         with lock:
             if len(buf) > cap:
@@ -183,7 +208,7 @@ def main():
                 take = len(buf) - cap + cap // 2
                 overflow = bytes(buf[:take])
                 del buf[:take]
-                frozen = transcribe(
+                frozen, _ = transcribe(
                     model,
                     np.frombuffer(overflow, np.int16).astype(np.float32) / 32768.0,
                     args)
@@ -192,7 +217,8 @@ def main():
             audio = np.frombuffer(bytes(buf), np.int16).astype(np.float32) / 32768.0
         if audio.size < SAMPLE_RATE // 4:      # under 250ms: nothing new to say
             return committed
-        text = transcribe(model, audio, args)
+        text, words = transcribe(model, audio, args, want_words)
+        last_words[:] = words
         return join(committed, text)
 
     while not done.is_set():
@@ -211,10 +237,14 @@ def main():
             emit({"type": "partial", "text": text})
 
     try:
-        text = current_text()
+        text = current_text(want_words=True)
     except Exception as e:
         die(f"Transcription failed: {e}")
-    emit({"type": "final", "text": text or last})
+    # Only the ones worth looking at. Everything scores high on clear speech,
+    # so a full dump would be noise.
+    unclear = sorted((w for w in last_words if w["p"] < args.unclear_below),
+                     key=lambda w: w["p"])[:6]
+    emit({"type": "final", "text": text or last, "unclear": unclear})
 
 
 if __name__ == "__main__":
