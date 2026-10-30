@@ -1994,14 +1994,73 @@ def current_prd():
     return "unfiled"
 
 
+PLACEHOLDER_MARK = "Replace this with the first real claim"
+
+
+def unbound_scaffolds():
+    """Ledgers that name no session and still hold only the placeholders.
+
+    Someone made these by hand -- `Ledger: new`, or `--new` -- and nothing
+    tied them to a conversation. Without this, `--ensure` cannot see them,
+    creates a second ledger for the same work, and the person ends up
+    reviewing one while Claude writes to the other. That happened.
+    """
+    out = []
+    if not PRDS.exists():
+        return out
+    for lg in sorted(PRDS.glob(GLOB)):
+        try:
+            text = lg.read_text()
+        except OSError:
+            continue
+        if re.search(r"^session:\s*\S", text, re.M):
+            continue                       # already bound to a conversation
+        if PLACEHOLDER_MARK in text:
+            out.append(lg)
+    return out
+
+
+def adopt(lg, sid, title=None):
+    """Bind an empty hand-made ledger to a session, in place.
+
+    Keeps its id, its path and anything already commented on it -- the point
+    is that it IS the ledger the person is looking at, so replacing it would
+    be the same mistake as making a second one.
+    """
+    text = lg.read_text()
+    if text.startswith("---\n"):
+        head, sep, rest = text[4:].partition("\n---\n")
+        lines = [l for l in head.splitlines() if not l.startswith("session:")]
+        if title and not any(l.startswith("title:") for l in lines):
+            lines.insert(0, f"title: {title}")
+        text = "---\n" + "\n".join(lines + [f"session: {sid}"]) + "\n---\n" + rest
+    else:
+        text = f"---\nsession: {sid}\n---\n\n" + text
+    lg.write_text(text)
+    return lg.parent
+
+
 def ensure(sid, prd=None):
-    """Create a ledger for this session if it has none. Idempotent."""
+    """Give this session a ledger. Adopt an empty hand-made one if there is
+    exactly one; only create when there is nothing to adopt. Idempotent."""
     have = known_sessions()
     if sid in have:
         return have[sid], False
     meta = session_meta(sid)
     if not meta:
         return None, False
+
+    spare = unbound_scaffolds()
+    if len(spare) == 1:
+        return adopt(spare[0], sid, meta["title"]), False
+    if len(spare) > 1:
+        # Ambiguous: say so rather than guess, and rather than quietly add
+        # a third ledger to the pile.
+        print("  several unbound ledgers -- bind one by hand with "
+              "`session: <id>`, or delete the spares:", file=sys.stderr)
+        for lg in spare:
+            print(f"    {lg}", file=sys.stderr)
+
     slug = re.sub(r"[^a-z0-9]+", "-", meta["title"].lower()).strip("-")[:48] or sid[:8]
     target = f"{prd or current_prd()}/{meta['date']}-{slug}"
     conv = conv_dir(target.split("/")[0], target.split("/", 1)[1])

@@ -173,6 +173,13 @@ Then:
     python3 "$LEDGER" --new <slug>           one not bound to a session
     python3 "$LEDGER" <group>/<slug>         re-render
 
+`--ensure` will **adopt** an empty hand-made ledger rather than add a second
+one: if exactly one ledger names no session and still holds the placeholder
+claims, it binds that one in place, keeping its name and path. Angel may well
+have made it from the panel before you got there, and reviewing one ledger
+while you write to another is the failure this avoids. With several unbound
+ones it refuses to guess and lists them -- ask which.
+
 Prefer `--ensure <session-id>`: it names the ledger after the conversation and
 binds it to the transcript, which is what makes the Conversation view work.
 `--new <slug>` is the fallback when there is no session to bind to; the group

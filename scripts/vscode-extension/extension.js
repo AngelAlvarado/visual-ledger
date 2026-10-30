@@ -277,16 +277,42 @@ async function createLedger() {
   });
   if (!topic) return null;
   if (!(await requireScript())) return null;
+  // Bind it to the conversation that is open, or Claude will not find it and
+  // will make a SECOND ledger for the same work -- the person then reviews
+  // one while Claude writes to the other. Claude Code names the project's
+  // transcript directory after the workspace path; the newest .jsonl in it is
+  // the session you are in.
+  const sessionId = (() => {
+    try {
+      const dir = path.join(require("os").homedir(), ".claude", "projects",
+                            workspaceRoot().replace(/\//g, "-"));
+      const newest = fs.readdirSync(dir)
+        .filter((f) => f.endsWith(".jsonl"))
+        .map((f) => ({ id: f.slice(0, -6), at: fs.statSync(path.join(dir, f)).mtimeMs }))
+        .sort((a, b) => b.at - a.at)[0];
+      // Only if it is plausibly the live one. A stale transcript would bind
+      // the ledger to the wrong conversation, which is worse than none.
+      return newest && Date.now() - newest.at < 60 * 60 * 1000 ? newest.id : "";
+    } catch (e) { return ""; }
+  })();
+
   const slug = new Date().toISOString().slice(0, 10) + "-"
     + topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
   try {
-    execFileSync("python3", [RENDER(), "--new", slug], { encoding: "utf8" });
+    const args = [RENDER(), "--new", slug];
+    if (sessionId) args.push(sessionId);
+    execFileSync("python3", args, { encoding: "utf8" });
   } catch (err) {
     vscode.window.showErrorMessage(
       `Could not create the ledger: ${String(err.stderr || err.message).trim()}`);
     return null;
   }
   const made = findLedgers().find((l) => l.slug === slug);
+  if (made && !sessionId) {
+    vscode.window.showInformationMessage(
+      "Ledger created, but not bound to a conversation - the Conversation tab "
+      + "will be empty, and Claude may create its own. Ask Claude to adopt it.");
+  }
   if (!made) {
     vscode.window.showErrorMessage(
       "Created the ledger, but the panel cannot see it. Run ledger.py --where.");

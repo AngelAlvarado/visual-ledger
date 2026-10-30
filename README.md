@@ -78,6 +78,17 @@ first -- both register the same command IDs:
 **To back out:** `claude plugin marketplace remove visual-ledger-marketplace`
 also uninstalls the plugin.
 
+### One conversation, one ledger
+
+`Ledger: new` binds the ledger to the conversation you have open, so Claude
+finds it instead of making its own. If it cannot tell which conversation that
+is, it says so.
+
+A ledger that ends up unbound anyway is not stranded: when Claude next runs
+`--ensure`, it **adopts** an empty hand-made ledger rather than creating a
+second one -- same name, same path, `session:` filled in. With more than one
+unbound ledger it refuses to guess and lists them.
+
 ### Your first ledger
 
 A fresh workspace has none, and with the hooks off nothing creates one, so
