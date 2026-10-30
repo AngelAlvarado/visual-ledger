@@ -288,6 +288,12 @@ extension -- write the module, point `backendModule` at it.
 - **Archive** (bottom) — collapsed. Dismissed and parked claims move here.
   Commenting on one brings it back; nothing is deleted.
 - **Send bar** (bottom) — appears when something is on Claude's side.
+- **Go to C...** (top right) — jump to any claim by id, with a dropdown of
+  all of them. A `C7` written inside a claim is also a link: claims
+  cross-reference constantly, and following one used to mean scrolling a
+  list of dozens. Only ids that exist are linked, so a stale reference stays
+  plain text. Either way the card flashes on arrival, and a filter or the
+  Archive hiding it is cleared first.
 - **Clear filters** — chips combine with AND, so *Risk* plus *Waiting on
   you* shows only claims that are both. When that is empty the page says
   which combination produced nothing and offers to clear it.

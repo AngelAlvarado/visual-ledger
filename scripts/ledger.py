@@ -773,6 +773,18 @@ button.mic[disabled]{opacity:.35;cursor:default}
 .chip.refresh{display:inline-flex;align-items:center;gap:5px}
 .chip.refresh.stale{color:var(--warn);border-color:var(--warn);font-weight:600}
 .chip.refresh.stale svg{animation:micblink 1.4s infinite}
+/* Jumping between claims. They cross-reference constantly and the list can
+   run to dozens, so both the box and the inline references land you on the
+   card and say so with a flash -- scrolling silently leaves you unsure
+   whether anything happened. */
+.goto{width:104px;font:inherit;font-size:12.5px;padding:5px 9px;border-radius:999px;
+  border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+.goto:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.cref{font:inherit;font-size:inherit;color:var(--accent);background:none;padding:0 1px;
+  border:0;border-bottom:1px dashed currentColor;cursor:pointer}
+.cref:hover{background:var(--code)}
+@keyframes claimflash{0%{box-shadow:0 0 0 3px var(--accent)}100%{box-shadow:0 0 0 3px transparent}}
+.claim.flash{animation:claimflash 1.1s ease-out}
 .tag.art{border-style:dashed}
 .tag.art.ok{color:var(--ok);border-color:var(--ok)}
 .tag.art.drift{color:var(--crit);border-color:var(--crit);font-weight:600}
@@ -1425,6 +1437,43 @@ document.querySelectorAll(".chip[data-kind]").forEach(ch=>ch.onclick=()=>{
    holding), so the panel can legitimately be behind. This says so, and is
    the way back regardless -- a manual re-read that never loses a draft,
    because saveUI has already mirrored it. */
+/* Land on a claim wherever it is. A filter may be hiding it and the Archive
+   may be holding it, so clear what would hide it rather than scrolling to
+   something invisible and looking broken. */
+function gotoClaim(id){
+  if(!id) return false;
+  id=String(id).trim().toUpperCase();
+  if(!/^C\d+$/.test(id)) id="C"+id.replace(/^C/,"");
+  const el=document.getElementById("claim-"+id);
+  if(!el) return false;
+  if(el.classList.contains("hide")||ARCHIVED.has(id)){
+    filter=null; tagFilter=null; onlyUncommented=false; onlyClaude=false; onlyMine=false;
+    document.querySelectorAll(".chip[data-kind]").forEach(o=>o.setAttribute("aria-pressed","false"));
+    ["unc","mine","tcl"].forEach(k=>{const b=document.getElementById(k);
+      if(b) b.setAttribute("aria-pressed","false");});
+    const arc=document.getElementById("archive");
+    if(arc && ARCHIVED.has(id)) arc.open=true;
+    render();
+  }
+  el.scrollIntoView({behavior:"smooth",block:"center"});
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+  saveUI();
+  return true;
+}
+
+document.addEventListener("click",ev=>{
+  const ref=ev.target.closest(".cref");
+  if(ref){ ev.preventDefault(); gotoClaim(ref.dataset.goto); }
+});
+
+(function(){
+  const box=document.getElementById("goto");
+  if(!box) return;
+  const go=()=>{ if(gotoClaim(box.value)) box.value=""; };
+  box.addEventListener("change",go);
+  box.addEventListener("keydown",ev=>{ if(ev.key==="Enter"){ev.preventDefault();go();} });
+})();
+
 document.getElementById("clearf").onclick=function(){
   filter=null; tagFilter=null; onlyUncommented=false; onlyClaude=false; onlyMine=false;
   document.querySelectorAll(".chip[data-kind]").forEach(o=>o.setAttribute("aria-pressed","false"));
@@ -1638,6 +1687,36 @@ def siblings(conv):
     return out
 
 
+def linkify(html, ids):
+    """Make `C7` inside a claim's own prose a button that jumps to C7.
+
+    Claims reference each other constantly -- "supersedes C15", "same trap as
+    C18" -- and following one meant scrolling a list of 38 looking for a
+    number. Only ids that actually exist are linked, so a stale reference
+    stays plain text and reads as the dead end it is.
+
+    Runs AFTER md(), i.e. on escaped HTML, and skips anything already inside
+    a tag so it cannot corrupt an href or a code span.
+    """
+    if not ids:
+        return html
+
+    def sub(m):
+        cid = m.group(0)
+        if cid not in ids:
+            return cid
+        return (f'<button class="cref" data-goto="{cid}" '
+                f'title="Jump to {cid}">{cid}</button>')
+
+    out, i = [], 0
+    for tag in re.finditer(r"<[^>]*>", html):
+        out.append(re.sub(r"\bC\d+\b", sub, html[i:tag.start()]))
+        out.append(tag.group(0))
+        i = tag.end()
+    out.append(re.sub(r"\bC\d+\b", sub, html[i:]))
+    return "".join(out)
+
+
 def claim_meta(c, dr=None):
     """Tag chips, the turn link, and the artifact this claim governs.
 
@@ -1720,15 +1799,19 @@ def build(meta, claims, comments, slug, disk_md, author, render_id, convs=None,
         for k, (label, col, desc) in KINDS.items() if counts.get(k))
 
     dr = drift(claims, comments)
+    claim_ids = {c["id"] for c in claims}
+    idopts = "".join(
+        f'<option value="{c["id"]}">{e(c["kind"])} - {e(c["text"][:60])}</option>'
+        for c in claims)
     body = "".join(f'''<article class="claim{' focus' if c["id"] in focus else ''}" id="claim-{c["id"]}" data-kind="{c["kind"]}">
   <div class="crow">
     <div class="cid mono">{e(c["id"])}</div>
     <div class="ctext">
       <span class="kind" style="--k:{KINDS[c["kind"]][1]}">{e(KINDS[c["kind"]][0])}</span>
       <span class="turn" style="--t:{TURN[turn[c["id"]]][1]}">{e(TURN[turn[c["id"]]][0])}</span>
-      <div>{md(c["text"])}</div>
-      {f'<p class="ctx">{md(c["context"])}</p>' if c.get("context") else ""}
-      {f'<details class="detail"><summary>why</summary><p>{md(c["detail"])}</p></details>'
+      <div>{linkify(md(c["text"]), claim_ids)}</div>
+      {f'<p class="ctx">{linkify(md(c["context"]), claim_ids)}</p>' if c.get("context") else ""}
+      {f'<details class="detail"><summary>why</summary><p>{linkify(md(c["detail"]), claim_ids)}</p></details>'
        if c["detail"] else ""}
       {claim_meta(c, dr)}
     </div>
@@ -1786,6 +1869,9 @@ def build(meta, claims, comments, slug, disk_md, author, render_id, convs=None,
     <i></i>Back with Claude<b>{n_cl}</b></button>
   <button class="chip" id="vturns" aria-pressed="false">Conversation<b>{len(turns_list or [])}</b></button>
   <span class="spacer"></span>
+  <input class="goto" id="goto" list="claimids" placeholder="Go to C..."
+    aria-label="Jump to a claim by id" autocomplete="off" spellcheck="false">
+  <datalist id="claimids">{idopts}</datalist>
   <button class="chip refresh" id="refresh" type="button"
     title="Re-read the ledger from disk">
     <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"
