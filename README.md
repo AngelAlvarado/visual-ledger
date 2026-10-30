@@ -73,7 +73,19 @@ If the panel cannot find `ledger.py` (likely when the plugin lives in
 `claudeLedger.scriptPath` in VS Code settings to the absolute path, or export
 `$LEDGER_PY`.
 
-### 3. Check
+### 3. Make your first ledger
+
+A fresh workspace has none, and with the hooks off nothing creates one, so
+`Ledger: review` will say so. Either accept its **Create one** offer, or:
+
+```
+Cmd+Shift+P -> Ledger: new ledger for this conversation
+```
+
+Give it a topic; the group defaults to your branch. On the CLI that is
+`ledger.py --new <slug>`, or `--new <group>/<slug>` to place it yourself.
+
+### 4. Check
 
 ```bash
 python3 /path/to/visual-ledger/scripts/ledger.py --where    # paths + ledgers found
@@ -268,7 +280,7 @@ Add to the consuming repo's `.gitignore`:
 python3 scripts/ledger.py --where              # paths + every ledger found
 python3 scripts/ledger.py --config             # resolved layout, as JSON
 python3 scripts/ledger.py --ensure <session>   # ledger for one session
-python3 scripts/ledger.py --new <group>/<slug> # manual, no session
+python3 scripts/ledger.py --new [<group>/]<slug>  # manual, no session
 python3 scripts/ledger.py <group>[/<slug>]     # re-render
 python3 scripts/ledger.py <group> --serve      # localhost, no extension
 python3 scripts/sync_conversations.py --list   # session ids + titles

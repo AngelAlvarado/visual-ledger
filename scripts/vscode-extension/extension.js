@@ -135,7 +135,15 @@ function findLedgers() {
 
 async function pickLedger(placeHolder) {
   const found = findLedgers();
-  if (!found.length) { vscode.window.showWarningMessage("No ledger.md in this workspace."); return null; }
+  if (!found.length) {
+    // A fresh workspace genuinely has none, and with the hooks off nothing
+    // creates one. Telling Angel that and stopping sent him to the CLI to
+    // look up a command; offer the command instead.
+    const pick = await vscode.window.showWarningMessage(
+      "No ledger in this workspace yet.", "Create one");
+    if (pick === "Create one") return await createLedger();
+    return null;
+  }
   if (found.length === 1) return found[0].dir;
   const pick = await vscode.window.showQuickPick(
     found.map((f) => ({ label: f.slug, description: f.prd, dir: f.dir })), { placeHolder });
@@ -210,6 +218,34 @@ function claudePatched() {
  *  browser in a devcontainer, which is the context switch we are removing.
  *  Why not the markdown gutter: the page carries filters, kind colours and
  *  folded detail that markdown cannot. */
+/** Create a ledger and return its directory, or null if cancelled.
+ *  The group is left to ledger.py, which defaults it to the branch. */
+async function createLedger() {
+  const topic = await vscode.window.showInputBox({
+    title: "New claim ledger",
+    prompt: "What is this conversation about?",
+    placeHolder: "intake schema import",
+    validateInput: (v) => (v || "").trim() ? null : "Give it a topic.",
+  });
+  if (!topic) return null;
+  const slug = new Date().toISOString().slice(0, 10) + "-"
+    + topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
+  try {
+    execFileSync("python3", [RENDER(), "--new", slug], { encoding: "utf8" });
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `Could not create the ledger: ${String(err.stderr || err.message).trim()}`);
+    return null;
+  }
+  const made = findLedgers().find((l) => l.slug === slug);
+  if (!made) {
+    vscode.window.showErrorMessage(
+      "Created the ledger, but the panel cannot see it. Run ledger.py --where.");
+    return null;
+  }
+  return made.dir;
+}
+
 function reviewPanel(context, conv, panels) {
   // One panel per PRD, not per conversation: the switcher moves between the
   // sibling ledgers inside it, so a project with five sessions is one tab.
@@ -504,6 +540,10 @@ function activate(context) {
       if (!conv) conv = await pickLedger("Review which ledger?");
       if (!conv) return;
       reviewPanel(context, conv, panels);
+    }),
+    vscode.commands.registerCommand("claudeLedger.new", async () => {
+      const dir = await createLedger();
+      if (dir) reviewPanel(context, dir, panels);
     }),
     vscode.commands.registerCommand("claudeLedger.open", async () => {
       const dir = await pickLedger("Open a claim ledger");

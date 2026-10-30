@@ -2018,8 +2018,13 @@ def scaffold(target, session=None, title=None):
     frontmatter -- which is exactly the kind of thing a command should do.
     """
     parts = target.strip("/").split("/")
-    if len(parts) != 2:
-        sys.exit("usage: ledger.py --new <prd>/<conversation-slug>")
+    # One segment means "just name the topic" -- the group is the same default
+    # --ensure uses (the branch, when it names a real unit of work). Demanding
+    # <group>/<slug> made creating a ledger a thing you had to look up.
+    if len(parts) == 1 and parts[0]:
+        parts = [current_prd(), parts[0]]
+    if len(parts) != 2 or not all(parts):
+        sys.exit("usage: ledger.py --new [<group>/]<slug>")
     conv = conv_dir(parts[0], parts[1])
     lg = conv / "ledger.md"
     if lg.exists():
@@ -2069,7 +2074,7 @@ def main(argv):
             print(f"   {f}")
         if not found:
             print("\nnothing yet -- create one with:")
-            print(f"   {self_cmd()} --new demo/2026-09-11-smoke-test")
+            print(f"   {self_cmd()} --new my-first-ledger")
         print("\nIn VS Code, check this matches the folder you have open:")
         print(f"   the extension scans {PRDS}")
         print(f"   if your workspace is not {ROOT}, set LEDGER_ROOT to it.")
@@ -2091,7 +2096,7 @@ def main(argv):
         return
     if argv[1] == "--new":
         if len(argv) < 3:
-            sys.exit("usage: ledger.py --new <prd>/<conversation-slug> [session-id]")
+            sys.exit("usage: ledger.py --new [<group>/]<slug> [session-id]")
         conv = scaffold(argv[2], argv[3] if len(argv) > 3 else None)
         out, claims, _ = render(conv, "angel")
         print(f"wrote {out}  ({len(claims)} placeholder claims)")
