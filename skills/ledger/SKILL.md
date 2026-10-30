@@ -154,18 +154,36 @@ the reply it came from with `turn: T7`.
 
 ## Starting one
 
-**Usually you don't.** A `SessionStart` hook gives every conversation a ledger
-named after itself, bound to its transcript. Your job is to fill it. The first
-real claim replaces the two placeholders the scaffold writes.
+**Check first, then create.** The `SessionStart` hook that used to do this is
+shipped disabled, so a conversation does NOT get a ledger on its own. If the
+work is producing decisions or assumptions and `--where` finds nothing for
+this conversation, make one before writing the first claim.
 
-    python3 .claude/skills/ledger/scripts/ledger.py --where     paths + every ledger found
-    python3 .claude/skills/ledger/scripts/ledger.py --config    resolved layout, as JSON
-    python3 .claude/skills/ledger/scripts/ledger.py <group>/<slug>   re-render
-    python3 .claude/skills/ledger/scripts/ledger.py --ensure <sid>   this conversation
-    python3 .claude/skills/ledger/scripts/ledger.py --new <group>/<slug>   manual, no session
+Find the script once and reuse it -- it lives in the plugin, not in the
+project, and the plugin's path is not fixed:
+
+    LEDGER=$(find ~/.claude/plugins ~/visual-ledger -name ledger.py \
+             -path '*/scripts/*' 2>/dev/null | head -1)
+
+Then:
+
+    python3 "$LEDGER" --where                paths + every ledger found
+    python3 "$LEDGER" --config               resolved layout, as JSON
+    python3 "$LEDGER" --ensure <session-id>  a ledger bound to THIS conversation
+    python3 "$LEDGER" --new <slug>           one not bound to a session
+    python3 "$LEDGER" <group>/<slug>         re-render
+
+Prefer `--ensure <session-id>`: it names the ledger after the conversation and
+binds it to the transcript, which is what makes the Conversation view work.
+`--new <slug>` is the fallback when there is no session to bind to; the group
+defaults to the branch.
+
+Run the renderer after every claim you add and every reply you write. That is
+also what prints the `waiting on Angel` line the turn-end gate depends on, so
+skipping it costs more than a stale page.
 
 Where ledgers live is resolved, not assumed -- `--config` prints it. Do not
-hardcode a path; ask.
+hardcode a path.
 
 When starting a ledger, check the siblings first: a claim made in one session
 is often exactly what another is about to contradict.

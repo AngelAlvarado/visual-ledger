@@ -19,96 +19,72 @@ C23 risk        The gradeslam-api copy has no owner
 
 ## Install
 
-Two pieces, because they install through different systems: the plugin (the
-skill) and the VS Code panel. **Hooks are off by default** — see
-[Enable the hooks](#enable-the-hooks-optional).
-
-### 1. The plugin
-
-This repository is both the plugin and a marketplace listing it, so it
-installs from a local path with no hosting:
+Two installs, because they go through different systems: the **plugin** (what
+teaches Claude the workflow) and the **VS Code panel** (what you review in).
+Neither can carry the other -- plugins hold skills and hooks, not editor
+extensions.
 
 ```bash
-claude plugin validate  /path/to/visual-ledger     # expect: Validation passed
-claude plugin marketplace add /path/to/visual-ledger
+# 1. Get the code. The panel and the renderer both live here.
+git clone git@github.com:AngelAlvarado/visual-ledger.git ~/visual-ledger
+
+# 2. Tell Claude Code where to find plugins. This repo is both the plugin
+#    and a one-entry marketplace listing it, so there is nothing to host.
+claude plugin marketplace add ~/visual-ledger
+
+# 3. Install the plugin itself. This is what puts the skill in Claude's
+#    context, so it knows the workflow exists. Pick a scope when asked:
+#    user (every project), project (committed, whole team), local (just here).
 claude plugin install visual-ledger@visual-ledger-marketplace
-claude plugin list                                  # expect: enabled
+
+# 4. Build and install the review panel as a VS Code extension. It also
+#    bakes this clone's ledger.py path in, so the panel needs no settings.
+bash ~/visual-ledger/scripts/install-extension.sh
+
+# 5. OPTIONAL. Lets the panel's "Send to Claude" button put text straight in
+#    the chat box instead of only the clipboard. You run it, not Claude:
+#    it patches the Claude Code extension, which Claude is blocked from
+#    touching. Re-run after each Claude Code update. --revert undoes it.
+python3 ~/visual-ledger/scripts/patch-claude-extension.py
 ```
 
-Pick a scope when prompted: **user** (every project on this machine),
-**project** (committed, for everyone in the repo), or **local** (this repo,
-just you).
+Then **`Developer: Reload Window`** so VS Code loads the extension.
 
-Just trying it, or actively editing it? Skip installation entirely — this
-loads it for one session and picks up edits on restart:
+Verify:
 
 ```bash
-claude --plugin-dir /path/to/visual-ledger
+# Prints the project root it resolved, where it looks, and what it found.
+# The first thing to run whenever anything looks wrong.
+python3 ~/visual-ledger/scripts/ledger.py --where
 ```
 
-To back out completely:
+### Notes on those steps
 
-```bash
-claude plugin marketplace remove visual-ledger-marketplace   # also uninstalls
-```
+**Developing it rather than using it?** Skip the marketplace entirely --
+`claude --plugin-dir ~/visual-ledger` loads the plugin straight from the
+clone for one session and picks up edits on restart. An installed plugin is
+a *cached copy*, so edits to the clone do not reach it until you bump the
+version and run `claude plugin update visual-ledger`.
 
-### 2. The VS Code panel (manual)
+**The panel is a manual `.vsix` on purpose.** Plugins carry skills, agents,
+hooks, commands and MCP servers -- not editor extensions. Extensions live in
+`~/.vscode-server`, often a Docker volume, so **re-run step 4 if that volume
+is recreated**.
 
-```bash
-bash /path/to/visual-ledger/scripts/install-extension.sh
-# then in VS Code: Developer: Reload Window
-```
+**Upgrading from the pre-plugin `claude-ledger` extension?** Uninstall it
+first -- both register the same command IDs:
+`code --uninstall-extension local.claude-ledger`
 
-Not packageable as a plugin component — plugins carry skills, agents, hooks,
-commands and MCP servers, not `.vsix` files. Extensions live in
-`~/.vscode-server`, which is often a Docker volume, so **re-run this after the
-volume is recreated**.
+**To back out:** `claude plugin marketplace remove visual-ledger-marketplace`
+also uninstalls the plugin.
 
-> **Upgrading from the pre-plugin `claude-ledger` extension?** Uninstall it
-> first — both register the same command IDs and two copies collide:
-> `code --uninstall-extension local.claude-ledger`
-
-`install-extension.sh` bakes the absolute path of this clone's `ledger.py`
-into the extension it builds, so the panel knows where the renderer is with
-no configuration at all. The path goes only into the installed copy, never
-back into the repo -- it is your machine's path, and committing it would
-hand everyone else a wrong one. It is a *default*, so an explicit
-`claudeLedger.scriptPath` still wins, and the extension checks the file
-exists before using it: move the clone and it falls back to searching.
-
-If it still cannot find `ledger.py` it asks, with a **Locate ledger.py...**
-button that remembers your answer, plus a **Ledger: locate ledger.py**
-command. It never guesses -- a guess surfaced as a python `No such file`
-naming a file inside your own project, which reads like the repo is broken
-rather than like the script is elsewhere.
-
-If the panel cannot find `ledger.py` (likely when the plugin lives in
-`~/.claude/plugins/` and the extension is looking in your workspace), set
-`claudeLedger.scriptPath` in VS Code settings to the absolute path, or export
-`$LEDGER_PY`.
-
-### 3. Make your first ledger
+### Your first ledger
 
 A fresh workspace has none, and with the hooks off nothing creates one, so
-`Ledger: review` will say so. Either accept its **Create one** offer, or:
-
-```
-Cmd+Shift+P -> Ledger: new ledger for this conversation
-```
-
-Give it a topic; the group defaults to your branch. On the CLI that is
-`ledger.py --new <slug>`, or `--new <group>/<slug>` to place it yourself.
-
-### 4. Check
-
-```bash
-python3 /path/to/visual-ledger/scripts/ledger.py --where    # paths + ledgers found
-python3 /path/to/visual-ledger/scripts/ledger.py --config   # resolved layout, as JSON
-```
-
-`--where` prints the project root it resolved. If that is the plugin's own
-directory rather than your project, `$CLAUDE_PROJECT_DIR` was not set — export
-`LEDGER_ROOT` instead.
+`Ledger: review` will say so. Either take its **Create one** offer, run
+`Ledger: new ledger for this conversation`, or just ask Claude to start one
+-- which is better, because Claude binds it to the conversation and the
+**Conversation** tab then works.
 
 ### Enable the hooks (optional)
 
@@ -130,6 +106,29 @@ absolute path. The format is identical.
 If a session stalls after enabling them, rename the file back and restart.
 
 ---
+
+## How Claude starts using it
+
+Installing the plugin puts the skill's name and description in Claude's
+context every turn, so it knows the workflow exists. It invokes itself when
+a conversation starts producing decisions, assumptions or findings -- or
+when you say so: *"start a ledger"*, *"log that claim"*, *"read my
+comments"*.
+
+**It will not create one silently.** The `SessionStart` hook that used to do
+that ships disabled, so if nothing happens, say **"start a ledger for this"**
+and Claude will make one bound to the conversation. You can also make it
+yourself with `Ledger: new ledger for this conversation`, though one made
+that way has no session attached and the **Conversation** tab stays empty.
+
+Claude is told to re-render after every claim and every reply. That is also
+what prints the `waiting on Angel` line it reads before composing a reply --
+the mechanism that stops it offering you decisions in chat prose instead of
+as claims you can answer in the panel.
+
+If Claude keeps writing long explanatory replies instead of claims, the
+nudge that used to catch that was a hook, and hooks are off. Say *"put that
+in the ledger"*.
 
 ## Daily use
 
@@ -290,19 +289,40 @@ Add to the consuming repo's `.gitignore`:
 
 ## Commands
 
+Every one takes the project from `$LEDGER_ROOT`, then `$CLAUDE_PROJECT_DIR`,
+then the git root above the current directory -- so run them from inside the
+project you are working on.
+
 ```bash
-python3 scripts/ledger.py --where              # paths + every ledger found
-python3 scripts/ledger.py --config             # resolved layout, as JSON
-python3 scripts/ledger.py --ensure <session>   # ledger for one session
-python3 scripts/ledger.py --new [<group>/]<slug>  # manual, no session
-python3 scripts/ledger.py <group>[/<slug>]     # re-render
-python3 scripts/ledger.py <group> --serve      # localhost, no extension
-python3 scripts/sync_conversations.py --list   # session ids + titles
+L=~/visual-ledger/scripts/ledger.py
+
+# Where am I, and what exists? Run this first whenever anything is wrong.
+# Prints the resolved project root, the layout, and every ledger found.
+python3 $L --where
+
+# The same answers as JSON. The panel and the hooks read this, which is how
+# all three stay agreed about where ledgers live.
+python3 $L --config
+
+# Make a ledger bound to a conversation, named after it, with the transcript
+# attached so the Conversation tab works. Idempotent -- safe to re-run.
+python3 $L --ensure <session-id>
+
+# Make one by hand, with no conversation attached. The group defaults to the
+# current branch; pass <group>/<slug> to place it yourself.
+python3 $L --new <slug>
+
+# Re-render. Rewrites index.html from ledger.md + comments.md, prints the
+# claim counts, any artifact drift, and what is waiting on you.
+python3 $L <group>/<slug>
+
+# Same, but served on localhost instead of written to a file. The fallback
+# when the VS Code panel is not available.
+python3 $L <group> --serve
+
+# Session ids and titles, for --ensure.
+python3 ~/visual-ledger/scripts/sync_conversations.py --list
 ```
-
-`--where` is the one to reach for when something looks wrong.
-
----
 
 ## Writing a claim
 
