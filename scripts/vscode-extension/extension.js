@@ -616,6 +616,40 @@ function activate(context) {
       if (!conv) return;
       reviewPanel(context, conv, panels);
     }),
+    vscode.commands.registerCommand("claudeLedger.delete", async () => {
+      const dir = await pickLedger("Delete which ledger?");
+      if (!dir) return;
+      const script = await requireScript();
+      if (!script) return;
+      // Dry run first: ledger.py refuses anything with real content and
+      // reports what is there, so the confirmation can state the cost
+      // instead of asking Angel to take it on trust.
+      let report = "";
+      let needsForce = false;
+      try {
+        report = execFileSync("python3", [script, "--rm", dir], { encoding: "utf8" });
+      } catch (err) {
+        report = String(err.stdout || "") + String(err.stderr || "");
+        needsForce = /--force/.test(report);
+      }
+      const summary = report.split("\n").filter(Boolean).slice(0, 2).join(" - ");
+      const ok = await vscode.window.showWarningMessage(
+        needsForce ? `This ledger has content. Delete it anyway?` : `Delete this ledger?`,
+        { modal: true, detail: summary },
+        "Delete");
+      if (ok !== "Delete") return;
+      try {
+        execFileSync("python3",
+          needsForce ? [script, "--rm", dir, "--force"] : [script, "--rm", dir],
+          { encoding: "utf8" });
+        vscode.window.showInformationMessage("Ledger deleted.");
+        const panel = panels.get(path.dirname(dir));
+        if (panel && panel.current === dir) panel.dispose();
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          `Could not delete: ${String(err.stderr || err.message).trim()}`);
+      }
+    }),
     vscode.commands.registerCommand("claudeLedger.locate", async () => {
       const found = RENDER();
       if (found) {

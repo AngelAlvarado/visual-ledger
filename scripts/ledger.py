@@ -1018,7 +1018,26 @@ function render(){
     }
     t.style.display=cs.length?"":"none";
   });
-  document.getElementById("empty").style.display=shown?"none":"";
+  /* Filters combine with AND, so two reasonable-looking chips can intersect
+     to nothing -- "Risk 3" and "Waiting on you 4" with no risk on your side
+     shows zero cards while both counts say otherwise. The counts are each
+     chip's own total, which is what makes the empty result look like a bug.
+     So name the combination and offer the way out. */
+  const emptyEl=document.getElementById("empty");
+  emptyEl.style.display=shown?"none":"";
+  if(!shown){
+    const on=[];
+    if(filter) on.push(KINDLABEL[filter]||filter);
+    if(onlyMine) on.push("Waiting on you");
+    if(onlyClaude) on.push("Back with Claude");
+    if(onlyUncommented) on.push("No comment yet");
+    if(tagFilter) on.push("#"+tagFilter);
+    document.getElementById("emptytxt").textContent = on.length>1
+      ? "No claim is all of: "+on.join(" + ")+". Filters combine."
+      : on.length===1
+        ? "No claim matches "+on[0]+"."
+        : "Nothing to show.";
+  }
   const arc=document.getElementById("archive");
   arc.hidden=!nArc; document.getElementById("arcn").textContent=nArc;
   const [msg,live]=statusLine(); setStatus(msg,live);
@@ -1141,6 +1160,7 @@ const MIC_SVG='<svg class="micico" viewBox="0 0 24 24" width="15" height="15" '
  +'stroke-width="2" stroke-linecap="round"/>'
  +'<path d="M12 18v3" fill="none" stroke="currentColor" stroke-width="2" '
  +'stroke-linecap="round"/></svg>';
+const KINDLABEL=__KINDLABEL__;
 const DICT={ch:null, box:null, ta:null, seq:0, base:"", said:""};
 
 function micBtn(box){ return box.querySelector("button.mic"); }
@@ -1395,6 +1415,13 @@ document.querySelectorAll(".chip[data-kind]").forEach(ch=>ch.onclick=()=>{
    holding), so the panel can legitimately be behind. This says so, and is
    the way back regardless -- a manual re-read that never loses a draft,
    because saveUI has already mirrored it. */
+document.getElementById("clearf").onclick=function(){
+  filter=null; tagFilter=null; onlyUncommented=false; onlyClaude=false; onlyMine=false;
+  document.querySelectorAll(".chip[data-kind]").forEach(o=>o.setAttribute("aria-pressed","false"));
+  ["unc","mine","tcl"].forEach(id=>{const el=document.getElementById(id);
+    if(el) el.setAttribute("aria-pressed","false");});
+  render(); saveUI();
+};
 document.getElementById("refresh").onclick=function(){
   saveUI();
   if(VSC) VSC.postMessage({type:"reload"});
@@ -1706,7 +1733,8 @@ def build(meta, claims, comments, slug, disk_md, author, render_id, convs=None,
 </article>''' for c in claims)
 
     title = meta.get("title", slug)
-    js = (JS.replace("__CLAIMS__", json.dumps([{"id": c["id"], "kind": c["kind"]} for c in claims]))
+    js = (JS.replace("__KINDLABEL__", json.dumps({k: v[0] for k, v in KINDS.items()}))
+            .replace("__CLAIMS__", json.dumps([{"id": c["id"], "kind": c["kind"]} for c in claims]))
             .replace("__COMMENTS__", json.dumps(comments))
             .replace("__DISKMD__", json.dumps(disk_md))
             .replace("__SLUG__", json.dumps(slug))
@@ -1759,7 +1787,8 @@ def build(meta, claims, comments, slug, disk_md, author, render_id, convs=None,
 </div></div>
 
 <main class="wrap" id="claimsview"><div id="cardlist">{body}</div>
-  <p class="empty" id="empty" style="display:none">Nothing matches that filter.</p>
+  <p class="empty" id="empty" style="display:none"><span id="emptytxt"></span>
+    <button class="btn" id="clearf" type="button">Clear filters</button></p>
   <details class="archive" id="archive" hidden>
     <summary>Archive <b id="arcn">0</b></summary>
     <p class="arcnote">Dismissed and parked claims. Out of the way, not deleted --
@@ -2153,6 +2182,36 @@ def main(argv):
                 made += 1
         print(f"{made} new ledger(s); {len(sids) - made} already had one")
         return
+    if argv[1] in ("--rm", "--delete"):
+        # Deleting is the one operation here that destroys work, so it says
+        # exactly what it is about to lose and refuses anything that looks
+        # used unless told twice. A duplicate ledger is the common case and
+        # is empty; a real one should take a deliberate --force.
+        if len(argv) < 3:
+            sys.exit("usage: ledger.py --rm <group>/<slug> [--force]")
+        conv = resolve(argv[2])
+        base = PRDS.resolve()
+        here = conv.resolve()
+        if base not in here.parents:
+            sys.exit(f"refusing: {here} is not under {base}")
+        meta, claims = parse_ledger(conv / "ledger.md")
+        comments = parse_comments(conv / "comments.md")
+        # An untouched scaffold still holds BOTH placeholder claims, and only
+        # the first carries the marker -- counting per-claim called a fresh
+        # ledger "1 real" and refused to delete it. The marker anywhere in the
+        # file means nobody has written here yet.
+        untouched = PLACEHOLDER_MARK in (conv / "ledger.md").read_text()
+        real = [] if untouched else claims
+        shots = [f for f in here.rglob("*") if f.suffix.lower() in IMG_TYPES]
+        print(f"{here}\n  {len(claims)} claims ({len(real)} real), "
+              f"{len(comments)} comments, {len(shots)} images")
+        if (real or comments) and "--force" not in argv:
+            sys.exit("  has real content -- re-run with --force to delete it anyway")
+        import shutil
+        shutil.rmtree(here)
+        print("  deleted")
+        return
+
     if argv[1] == "--new":
         if len(argv) < 3:
             sys.exit("usage: ledger.py --new [<group>/]<slug> [session-id]")
@@ -2169,6 +2228,7 @@ def main(argv):
                  "  ledger.py <prd>[/<slug>]        render\n"
                  "  ledger.py --new <prd>/<slug>    create a starter ledger\n"
                  "  ledger.py --where               show paths and find ledgers\n"
+                 "  ledger.py --rm <prd>/<slug>     delete one (asks first)\n"
                  "  ledger.py --serve               serve it on localhost")
     conv = resolve(args[0])
     author = args[1] if len(args) > 1 else "angel"

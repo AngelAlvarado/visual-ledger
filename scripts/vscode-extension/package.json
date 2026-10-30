@@ -2,7 +2,7 @@
   "name": "visual-ledger",
   "displayName": "Visual Ledger",
   "description": "GitHub-style review comments on a Claude claim ledger, written back to comments.md",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "publisher": "local",
   "private": true,
   "license": "MIT",
@@ -56,6 +56,10 @@
       {
         "command": "claudeLedger.locate",
         "title": "Ledger: locate ledger.py"
+      },
+      {
+        "command": "claudeLedger.delete",
+        "title": "Ledger: delete a ledger"
       }
     ],
     "menus": {

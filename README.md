@@ -78,6 +78,13 @@ first -- both register the same command IDs:
 **To back out:** `claude plugin marketplace remove visual-ledger-marketplace`
 also uninstalls the plugin.
 
+### Deleting one
+
+`Ledger: delete a ledger` in the palette, or `ledger.py --rm <group>/<slug>`.
+Both report what is in it first and refuse anything holding real claims or
+comments unless you pass `--force`; an untouched scaffold goes without
+argument. Deletion is confined to the configured ledgers directory.
+
 ### One conversation, one ledger
 
 `Ledger: new` binds the ledger to the conversation you have open, so Claude
@@ -218,6 +225,9 @@ extension -- write the module, point `backendModule` at it.
 - **Archive** (bottom) — collapsed. Dismissed and parked claims move here.
   Commenting on one brings it back; nothing is deleted.
 - **Send bar** (bottom) — appears when something is on Claude's side.
+- **Clear filters** — chips combine with AND, so *Risk* plus *Waiting on
+  you* shows only claims that are both. When that is empty the page says
+  which combination produced nothing and offers to clear it.
 - **Refresh** (top right) — re-reads the ledger from disk. It turns amber and
   says *Updated — refresh* when Claude changed something while you were
   mid-comment.
@@ -330,6 +340,11 @@ python3 $L <group>/<slug>
 # Same, but served on localhost instead of written to a file. The fallback
 # when the VS Code panel is not available.
 python3 $L <group> --serve
+
+# Delete one. Reports what is in it first, and refuses anything with real
+# claims or comments unless you add --force. Only ever deletes inside the
+# configured ledgers directory.
+python3 $L --rm <group>/<slug> [--force]
 
 # Session ids and titles, for --ensure.
 python3 ~/visual-ledger/scripts/sync_conversations.py --list
