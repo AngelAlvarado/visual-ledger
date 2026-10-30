@@ -68,6 +68,12 @@ volume is recreated**.
 > first — both register the same command IDs and two copies collide:
 > `code --uninstall-extension local.claude-ledger`
 
+If the panel cannot find `ledger.py` it now asks, with a **Locate
+ledger.py...** button that remembers your answer, and there is a
+**Ledger: locate ledger.py** command. It no longer guesses a path -- a guess
+surfaced as a python `No such file` naming a file inside your own project,
+which reads like the repo is broken rather than like the script is elsewhere.
+
 If the panel cannot find `ledger.py` (likely when the plugin lives in
 `~/.claude/plugins/` and the extension is looking in your workspace), set
 `claudeLedger.scriptPath` in VS Code settings to the absolute path, or export

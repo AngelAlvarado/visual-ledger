@@ -60,24 +60,44 @@ const SCRIPT_CANDIDATES = [
  *  fetches it into ~/.claude/plugins/. The extension is a separate install
  *  with no knowledge of which plugin dir won, so scan for the one that
  *  carries our script rather than hardcoding a name that may be versioned. */
+/** Installed as a plugin the code is NOT in the workspace -- Claude Code
+ *  keeps it under ~/.claude/plugins. The layout there is not contractual:
+ *  a marketplace added from a local path may be read in place with nothing
+ *  cached at all, and a cached one nests by marketplace and version. So
+ *  scan rather than assume, and scan the sibling trees too. */
 function pluginCandidates() {
-  const base = path.join(require("os").homedir(), ".claude", "plugins");
+  const home = require("os").homedir();
+  const roots = [
+    path.join(home, ".claude", "plugins"),
+    path.join(home, ".claude", "skills"),
+  ];
   const out = [];
   const walk = (dir, depth) => {
-    if (depth > 3) return;
+    if (depth > 5 || out.length) return;          // first hit is enough
     let entries = [];
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
-    for (const d of entries.filter((d) => d.isDirectory())) {
+    for (const d of entries.filter((x) => x.isDirectory())) {
+      if (d.name === "node_modules" || d.name === ".git") continue;
       const here = path.join(dir, d.name);
       const hit = path.join(here, "scripts", "ledger.py");
-      if (fs.existsSync(hit)) out.push(hit);
-      else walk(here, depth + 1);
+      if (fs.existsSync(hit)) { out.push(hit); return; }
+      walk(here, depth + 1);
     }
   };
-  walk(base, 0);
+  for (const r of roots) walk(r, 0);
+  // A plain clone, which is how the README says to install it.
+  for (const guess of ["visual-ledger", "src/visual-ledger", "code/visual-ledger"]) {
+    const hit = path.join(home, guess, "scripts", "ledger.py");
+    if (fs.existsSync(hit)) out.push(hit);
+  }
   return out;
 }
 
+/** Absolute path to ledger.py, or "" when it genuinely cannot be found.
+ *  Returning a GUESSED path was worse than returning nothing: the guess
+ *  surfaced as a python ENOENT naming a file in the user's own project,
+ *  which reads like the repo is broken rather than like the script is
+ *  somewhere else. */
 function RENDER() {
   const cfg = vscode.workspace.getConfiguration("claudeLedger").get("scriptPath");
   if (cfg && fs.existsSync(cfg)) return cfg;
@@ -87,9 +107,35 @@ function RENDER() {
     const p = path.join(root, ...parts);
     if (fs.existsSync(p)) return p;
   }
-  const plugin = pluginCandidates()[0];
-  if (plugin) return plugin;
-  return path.join(root, ...SCRIPT_CANDIDATES[0]);
+  return pluginCandidates()[0] || "";
+}
+
+/** Ask for it once, remember it, and get on with what was being done. */
+async function locateScript() {
+  const pick = await vscode.window.showWarningMessage(
+    "Cannot find ledger.py. Point the panel at your visual-ledger clone.",
+    "Locate ledger.py...", "Cancel");
+  if (pick !== "Locate ledger.py...") return "";
+  const sel = await vscode.window.showOpenDialog({
+    title: "Select ledger.py",
+    canSelectMany: false,
+    filters: { "ledger.py": ["py"] },
+  });
+  const chosen = sel && sel[0] && sel[0].fsPath;
+  if (!chosen) return "";
+  if (path.basename(chosen) !== "ledger.py") {
+    vscode.window.showErrorMessage("That is not ledger.py.");
+    return "";
+  }
+  await vscode.workspace.getConfiguration("claudeLedger")
+    .update("scriptPath", chosen, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(`Ledger: using ${chosen}`);
+  return chosen;
+}
+
+/** RENDER(), but asks rather than failing with a confusing path. */
+async function requireScript() {
+  return RENDER() || await locateScript();
 }
 
 /** Layout, straight from ledger.py so the panel and the renderer can never
@@ -99,7 +145,9 @@ function layout() {
   if (_layout) return _layout;
   const fallback = { base: path.join(workspaceRoot(), ".claude", "ledgers"), mid: "" };
   try {
-    const out = execFileSync("python3", [RENDER(), "--config"],
+    const script = RENDER();
+    if (!script) return fallback;        // asked for elsewhere; do not shell out to ""
+    const out = execFileSync("python3", [script, "--config"],
                                 { encoding: "utf8", timeout: 5000 });
     const d = JSON.parse(out);
     _layout = { base: d.base, mid: d.mid || "" };
@@ -228,6 +276,7 @@ async function createLedger() {
     validateInput: (v) => (v || "").trim() ? null : "Give it a topic.",
   });
   if (!topic) return null;
+  if (!(await requireScript())) return null;
   const slug = new Date().toISOString().slice(0, 10) + "-"
     + topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
   try {
@@ -540,6 +589,15 @@ function activate(context) {
       if (!conv) conv = await pickLedger("Review which ledger?");
       if (!conv) return;
       reviewPanel(context, conv, panels);
+    }),
+    vscode.commands.registerCommand("claudeLedger.locate", async () => {
+      const found = RENDER();
+      if (found) {
+        const keep = await vscode.window.showInformationMessage(
+          `Ledger is using ${found}`, "Pick a different one");
+        if (keep !== "Pick a different one") return;
+      }
+      await locateScript();
     }),
     vscode.commands.registerCommand("claudeLedger.new", async () => {
       const dir = await createLedger();
