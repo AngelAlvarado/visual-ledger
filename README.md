@@ -183,17 +183,26 @@ Runs on your machine. No token, nothing that expires, no undocumented
 endpoint, works offline.
 
 ```bash
-pip install faster-whisper numpy    # the model library
-sudo apt install sox                # the `rec` recorder (brew install sox on macOS)
+sudo apt install sox        # the `rec` recorder (brew install sox on macOS)
 ```
 
-Then, in VS Code settings:
+That is the only install. The Python side declares its dependencies inline
+(PEP 723), so `uv run` fetches faster-whisper into its own cache on first
+use -- nothing to pip-install, nothing in a system Python. You need
+[uv](https://docs.astral.sh/uv/) on PATH.
 
-```json
-"claudeLedger.dictation.backend": "local"
+Then pick the backend:
+
+```
+Cmd+Shift+P -> Ledger: choose dictation backend -> Local (faster-whisper)
 ```
 
-That is all it needs. The first dictation downloads the model (~75 MB for
+No settings JSON. The same picker is offered beside any dictation error,
+since most failures mean "this backend is not set up here".
+
+Prefer your own interpreter? Set `dictation.runner` to `python` and
+`dictation.python` to something with `faster-whisper` and `numpy`
+installed. The first dictation downloads the model (~75 MB for
 `small.en`) and is slow to start; after that it is local and quiet.
 
 | Setting | Default | Notes |

@@ -321,6 +321,52 @@ async function createLedger() {
   return made.dir;
 }
 
+/** Choose the dictation backend without editing settings JSON.
+ *  The descriptions carry what each one actually costs, because that is the
+ *  whole basis for choosing and it is invisible from the names. */
+const BACKENDS = [
+  { id: "fake", label: "Fake",
+    detail: "Scripted placeholder text. The microphone is never opened." },
+  { id: "local", label: "Local (faster-whisper)",
+    detail: "Runs on this machine. Needs uv (or faster-whisper) and sox. "
+          + "No token, nothing expires, works offline." },
+  { id: "anthropic", label: "Anthropic (hosted socket)",
+    detail: "Works, but needs a claude.ai token that expires in hours, "
+          + "against an undocumented endpoint." },
+  { id: "custom", label: "Custom module",
+    detail: "Your own module, named by dictation.backendModule." },
+  { id: "off", label: "Off", detail: "No dictate button." },
+];
+
+async function pickBackend() {
+  const cfg = vscode.workspace.getConfiguration("claudeLedger");
+  const now = cfg.get("dictation.backend") || "fake";
+  const choice = await vscode.window.showQuickPick(
+    BACKENDS.map((b) => ({
+      label: (b.id === now ? "$(check) " : "") + b.label,
+      detail: b.detail,
+      id: b.id,
+    })),
+    { title: "Dictation backend", placeHolder: `Currently: ${now}` });
+  if (!choice || choice.id === now) return choice ? choice.id : null;
+  await cfg.update("dictation.backend", choice.id, vscode.ConfigurationTarget.Global);
+
+  if (choice.id === "local") {
+    vscode.window.showInformationMessage(
+      "Local dictation selected. The first use downloads the model, so it is "
+      + "slow to start once. Needs `sox` for the microphone.");
+  }
+  if (choice.id === "anthropic" && !cfg.get("dictation.tokenPath")) {
+    vscode.window.showWarningMessage(
+      "Set claudeLedger.dictation.tokenPath to a file holding a claude.ai token.");
+  }
+  if (choice.id === "custom" && !cfg.get("dictation.backendModule")) {
+    vscode.window.showWarningMessage(
+      "Set claudeLedger.dictation.backendModule to a module exporting start().");
+  }
+  return choice.id;
+}
+
 function reviewPanel(context, conv, panels) {
   // One panel per PRD, not per conversation: the switcher moves between the
   // sibling ledgers inside it, so a project with five sessions is one tab.
@@ -421,6 +467,10 @@ function wirePanel(context, panel, conv, panels) {
       // webview store, so the repaint cannot cost them anything.
       busy = false; missed = false;
       paint(true);
+      return;
+    }
+    if (msg && msg.type === "dictate:pick") {
+      pickBackend();
       return;
     }
     if (msg && msg.type === "busy") {
@@ -649,6 +699,9 @@ function activate(context) {
         vscode.window.showErrorMessage(
           `Could not delete: ${String(err.stderr || err.message).trim()}`);
       }
+    }),
+    vscode.commands.registerCommand("claudeLedger.pickBackend", async () => {
+      await pickBackend();
     }),
     vscode.commands.registerCommand("claudeLedger.locate", async () => {
       const found = RENDER();

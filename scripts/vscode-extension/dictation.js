@@ -107,6 +107,8 @@ function pick(vscode) {
     const { localBackend } = require("./dictation-local");
     const opts = {
       scriptPath: pickScriptPath(vscode),
+      runner: cfg.get("dictation.runner") || "uv",
+      uv: cfg.get("dictation.uv") || "uv",
       python: cfg.get("dictation.python") || "python3",
       model: cfg.get("dictation.model") || "small.en",
       device: cfg.get("dictation.device") || "cpu",

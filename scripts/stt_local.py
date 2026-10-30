@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["faster-whisper>=1.0", "numpy"]
+# ///
 """Local streaming dictation for the ledger panel, on faster-whisper.
 
 Reads raw audio on stdin, writes JSON lines on stdout. Nothing leaves the
@@ -30,8 +34,18 @@ Re-decoding grows with the utterance, so the audio considered is capped at
 buffer and its text is frozen into a committed prefix, so long dictation
 stays responsive without losing what was already said.
 
-    python3 stt_local.py --model small.en --device cpu
-    python3 stt_local.py --selftest        # no audio: just prove it loads
+DEPENDENCIES
+
+Declared inline (PEP 723), so `uv run` fetches them into its own cache on
+first use and there is nothing to install by hand and nothing to pollute a
+system Python:
+
+    uv run scripts/stt_local.py --selftest      # no audio: prove it loads
+    uv run scripts/stt_local.py --model small.en --device cpu
+
+Plain Python still works if the two packages are already importable:
+
+    python3 scripts/stt_local.py --selftest
 """
 import argparse
 import json

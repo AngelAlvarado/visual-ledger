@@ -765,7 +765,7 @@ button.mic[disabled]{opacity:.35;cursor:default}
    reads as provisional until an endpoint frame commits it into the textarea. */
 .compose textarea.dictating{border-color:var(--accent)}
 .interim{color:var(--faint);font-style:italic;padding:5px 2px 0;font-size:12px;min-height:1em}
-.micerr{color:var(--crit);font-size:12px;padding:5px 2px 0}
+.micerr{color:var(--crit);font-size:12px;padding:5px 2px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 /* Artifact chip. Neutral while the claim is open, green once the file has
    moved, red when it has not -- the one state that is a to-do. */
 /* Refresh. Quiet until the panel is actually behind -- a button that always
@@ -1176,8 +1176,18 @@ function micState(box,state,err){
   const iv=box.querySelector(".interim");
   if(iv && state==="idle"){ iv.hidden=true; iv.textContent=""; }
   let e=box.querySelector(".micerr");
-  if(err){ if(!e){e=document.createElement("div");e.className="micerr";box.appendChild(e);}
-           e.textContent=err; }
+  if(err){
+    if(!e){e=document.createElement("div");e.className="micerr";box.appendChild(e);}
+    e.textContent="";
+    e.appendChild(document.createTextNode(err+" "));
+    /* Most dictation failures are "this backend is not set up here", and the
+       fix is to pick another one. Offering it beside the error beats making
+       Angel remember a command exists. */
+    const b=document.createElement("button");
+    b.className="btn"; b.type="button"; b.textContent="Change backend";
+    b.onclick=()=>{ if(VSC) VSC.postMessage({type:"dictate:pick"}); };
+    e.appendChild(b);
+  }
   else if(e) e.remove();
 }
 

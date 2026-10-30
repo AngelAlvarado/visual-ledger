@@ -2,7 +2,7 @@
   "name": "visual-ledger",
   "displayName": "Visual Ledger",
   "description": "GitHub-style review comments on a Claude claim ledger, written back to comments.md",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "publisher": "local",
   "private": true,
   "license": "MIT",
@@ -24,6 +24,10 @@
         "command": "claudeLedger.review",
         "title": "Ledger: review (rich panel)",
         "icon": "$(preview)"
+      },
+      {
+        "command": "claudeLedger.pickBackend",
+        "title": "Ledger: choose dictation backend"
       },
       {
         "command": "claudeLedger.new",
@@ -146,7 +150,7 @@
         "claudeLedger.dictation.python": {
           "type": "string",
           "default": "python3",
-          "description": "Python used for local transcription. Must have faster-whisper installed."
+          "description": "Interpreter used when runner is 'python'. Must have faster-whisper and numpy."
         },
         "claudeLedger.dictation.model": {
           "type": "string",
@@ -166,6 +170,24 @@
           "type": "string",
           "default": "int8",
           "description": "int8 on CPU, float16 on a GPU."
+        },
+        "claudeLedger.dictation.runner": {
+          "type": "string",
+          "enum": [
+            "uv",
+            "python"
+          ],
+          "default": "uv",
+          "enumDescriptions": [
+            "uv run -- reads the script's inline dependencies and fetches them itself. Nothing to install",
+            "A plain interpreter that already has faster-whisper and numpy"
+          ],
+          "description": "How the local transcriber is launched."
+        },
+        "claudeLedger.dictation.uv": {
+          "type": "string",
+          "default": "uv",
+          "description": "Path to uv, if it is not on PATH."
         }
       }
     }

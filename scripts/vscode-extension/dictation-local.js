@@ -25,9 +25,20 @@ function helperFor(renderPath) {
   return path.join(path.dirname(renderPath), "stt_local.py");
 }
 
+/** How to launch the helper. `uv run` reads the PEP 723 block at the top of
+ *  stt_local.py and fetches faster-whisper into its own cache, so there is
+ *  nothing to install by hand and nothing lands in a system Python. Falling
+ *  back to a plain interpreter keeps it working where uv is absent. */
+function launcher(opts, helper) {
+  if ((opts.runner || "uv") === "uv") {
+    return { cmd: opts.uv || "uv", args: ["run", "--script", helper] };
+  }
+  return { cmd: opts.python || "python3", args: [helper] };
+}
+
 function localBackend(channel, cb, opts) {
-  const python = opts.python || "python3";
   const helper = helperFor(opts.scriptPath || "");
+  const { cmd, args: launchArgs } = launcher(opts, helper);
   let stopped = false;
   let rec = null;
   let stt = null;
@@ -53,20 +64,22 @@ function localBackend(channel, cb, opts) {
   // milliseconds -- "connecting" stays up until the helper says ready, so
   // the pulsing mic is not claiming to hear anything yet.
   try {
-    stt = spawn(python, [
-      helper,
+    stt = spawn(cmd, [
+      ...launchArgs,
       "--model", opts.model || "small.en",
       "--device", opts.device || "cpu",
       "--compute-type", opts.computeType || "int8",
       "--language", opts.language || "en",
     ], { stdio: ["pipe", "pipe", "pipe"] });
   } catch (e) {
-    return fail(`Could not start ${python}: ${e.message}`), cleanup;
+    return fail(`Could not start ${cmd}: ${e.message}`), cleanup;
   }
 
   stt.on("error", (e) => fail(
     e.code === "ENOENT"
-      ? `${python} not found. Set claudeLedger.dictation.python.`
+      ? `${cmd} not found. Install uv, or set claudeLedger.dictation.runner `
+        + `to "python" and claudeLedger.dictation.python to an interpreter `
+        + `that has faster-whisper.`
       : String(e.message)));
 
   let out = "";
